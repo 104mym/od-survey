@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>智揚雲端下料助手 - 管理員旗艦版</title>
+    <title>丈量尺寸 - 旗艦正式版</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -28,17 +28,17 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, getDoc, deleteDoc, collection, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { getStorage, ref, uploadBytesResumable, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-storage.js";
         
-        window.FB = { initializeApp, getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken, getFirestore, doc, setDoc, getDoc, deleteDoc, collection, onSnapshot, getStorage, ref, uploadBytesResumable, getDownloadURL };
+        window.FB = { initializeApp, getAuth, signInAnonymously, onAuthStateChanged, getFirestore, doc, setDoc, getDoc, deleteDoc, collection, onSnapshot, getStorage, ref, uploadBytesResumable, getDownloadURL };
     </script>
 
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        // 安全圖示元件：避免 React DOM 衝突崩潰
+        // 安全圖示元件
         const Icon = ({ name, className }) => {
             const ref = useRef(null);
             useEffect(() => {
@@ -48,11 +48,7 @@
                     window.lucide.createIcons({ root: temp });
                     const svg = temp.querySelector('svg');
                     if (svg) {
-                        if (className) {
-                            className.split(' ').forEach(c => {
-                                if (c.trim()) svg.classList.add(c.trim());
-                            });
-                        }
+                        if (className) className.split(' ').forEach(c => { if (c.trim()) svg.classList.add(c.trim()); });
                         ref.current.innerHTML = '';
                         ref.current.appendChild(svg);
                     }
@@ -61,7 +57,7 @@
             return <span ref={ref} className="inline-flex items-center justify-center" />;
         };
 
-        const apiKey = ""; // 執行環境自動提供
+        const apiKey = ""; // Gemini API 密鑰
 
         const App = () => {
             const [view, setView] = useState("main"); 
@@ -74,10 +70,10 @@
             const [isRecording, setIsRecording] = useState(false);
             const [transcript, setTranscript] = useState("");
             const [mode, setMode] = useState("Local");
-            
             const [videoUrl, setVideoUrl] = useState(null); 
             const [uploadProgress, setUploadProgress] = useState(0); 
             const [deleteConfirm, setDeleteConfirm] = useState(null);
+            const [logoImgBase64, setLogoImgBase64] = useState("");
 
             const recognitionRef = useRef(null);
             const fileInputRef = useRef(null);
@@ -85,10 +81,7 @@
 
             const getTodayDateStr = () => {
                 const now = new Date();
-                const y = now.getFullYear();
-                const m = String(now.getMonth() + 1).padStart(2, '0');
-                const d = String(now.getDate()).padStart(2, '0');
-                return `${y}${m}${d}`;
+                return `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
             };
 
             const [header, setHeader] = useState({
@@ -108,218 +101,16 @@
 
             const [timer, setTimer] = useState(0);
 
-            useEffect(() => {
-                let interval;
-                if (isRecording) {
-                    interval = setInterval(() => setTimer(prev => prev + 1), 1000);
-                } else if (!isRecording && timer !== 0) {
-                    clearInterval(interval);
-                }
-                return () => clearInterval(interval);
-            }, [isRecording, timer]);
-
-            useEffect(() => {
-                const init = async () => {
-                    try {
-                        const firebaseConfig = JSON.parse(__firebase_config);
-                        const appId = typeof __app_id !== 'undefined' ? __app_id : 'od-survey-system';
-                        
-                        const app = window.FB.initializeApp(firebaseConfig);
-                        const firestore = window.FB.getFirestore(app);
-                        const storageInstance = window.FB.getStorage(app);
-                        setDb(firestore);
-                        setStorage(storageInstance);
-                        
-                        const auth = window.FB.getAuth(app);
-                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                            await window.FB.signInWithCustomToken(auth, __initial_auth_token);
-                        } else {
-                            await window.FB.signInAnonymously(auth);
-                        }
-
-                        window.FB.onAuthStateChanged(auth, (u) => {
-                            if (u) {
-                                setMode("Cloud");
-                                fetchHistory(firestore, appId);
-                                setIsReady(true);
-                            }
-                        });
-                        
-                        setTimeout(() => setIsReady(true), 1500);
-                    } catch (e) { 
-                        setMode("Local");
-                        setIsReady(true); 
-                    }
-                };
-                init();
-
-                if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-                    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-                    recognitionRef.current = new SpeechRecognition();
-                    recognitionRef.current.continuous = true; 
-                    recognitionRef.current.interimResults = true; 
-                    recognitionRef.current.lang = 'zh-TW';
-                    
-                    recognitionRef.current.onresult = (e) => {
-                        let interim = "";
-                        let finalStr = "";
-                        for (let i = e.resultIndex; i < e.results.length; ++i) {
-                            if (e.results[i].isFinal) finalStr += e.results[i][0].transcript;
-                            else interim += e.results[i][0].transcript;
-                        }
-                        if (finalStr) transcriptAccumulator.current += finalStr + "，";
-                        setTranscript(transcriptAccumulator.current + interim);
-                    };
-                    
-                    recognitionRef.current.onend = () => {
-                        if (isRecording) {
-                            try { recognitionRef.current.start(); } catch(e){}
-                        }
-                    };
-                    
-                    recognitionRef.current.onerror = () => setIsRecording(false);
-                }
-            }, []);
-
-            const fetchHistory = (fdb, curAppId) => {
-                try {
-                    const colRef = window.FB.collection(fdb, 'artifacts', curAppId, 'public', 'data', 'cases');
-                    window.FB.onSnapshot(colRef, (snap) => {
-                        const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                        setAllCases(list.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)));
-                    });
-                } catch(e){}
+            const firebaseConfig = {
+                apiKey: "AIzaSyBEcCQcuwCh30xDmj3wE-3CM2YffgIxfAk",
+                authDomain: "tao-men.firebaseapp.com",
+                projectId: "tao-men",
+                storageBucket: "tao-men.firebasestorage.app",
+                messagingSenderId: "332609297071",
+                appId: "1:332609297071:web:03593a930475c97b87525a"
             };
 
-            const parseSpeech = async (text) => {
-                if (!text.trim()) return;
-                setIsLoading(true);
-                const prompt = `你是一個專業裝潢助理。解析以下語音，裡面包含「多筆」尺寸數據。請仔細分出每一筆。輸出 JSON 格式：{"items": [{"w":洞寬, "h":洞高, "t":牆厚, "style":"房"或"浴", "note":"備註"}]}。語音內容：${text}。只回傳 JSON，不要其他文字。`;
-                try {
-                    const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
-                    });
-                    const data = await resp.json();
-                    const clean = data.candidates[0].content.parts[0].text.replace(/```json|```/g, "").trim();
-                    const p = JSON.parse(clean);
-                    
-                    if (p.items && Array.isArray(p.items)) {
-                        setMeasurements(prev => {
-                            const newItems = p.items.map((item, idx) => ({
-                                id: Date.now() + Math.random(),
-                                no: (prev.length + idx + 1) + ".",
-                                w: parseInt(item.w) || 0, h: parseInt(item.h) || 0, 
-                                dw: item.w ? parseInt(item.w) - 48 : 0, 
-                                dh: item.h ? parseInt(item.h) - 30 : 0, 
-                                t: parseInt(item.t) || 0,
-                                body: parseInt(item.t) || 0,
-                                trim: 50,
-                                style: item.style || "房", note: item.note || ""
-                            }));
-                            return [...prev, ...newItems];
-                        });
-                    }
-                } catch (e) { console.error(e); }
-                finally { 
-                    setIsLoading(false); 
-                    transcriptAccumulator.current = "";
-                    setTranscript("");
-                }
-            };
-
-            const toggleRecording = () => {
-                if (!recognitionRef.current) return alert("您的瀏覽器不支援語音辨識");
-                if (isRecording) {
-                    recognitionRef.current.stop();
-                    setIsRecording(false);
-                    if (transcriptAccumulator.current) parseSpeech(transcriptAccumulator.current);
-                } else {
-                    transcriptAccumulator.current = "";
-                    setTranscript("");
-                    try {
-                        recognitionRef.current.start();
-                        setIsRecording(true);
-                        setTimer(0);
-                    } catch (e) { console.log(e); }
-                }
-            };
-
-            const handleVideoSelect = (e) => {
-                const file = e.target.files[0];
-                if (!file) return;
-                setVideoUrl(URL.createObjectURL(file));
-
-                if (!storage || mode === "Local") {
-                    alert("目前為本地模式。請手動上傳後貼上網址，或連線雲端後上傳。");
-                    return;
-                }
-
-                const appId = typeof __app_id !== 'undefined' ? __app_id : 'od-official-app';
-                const storageRef = window.FB.ref(storage, `artifacts/${appId}/videos/${header.orderNo}_${Date.now()}`);
-                const uploadTask = window.FB.uploadBytesResumable(storageRef, file);
-
-                uploadTask.on('state_changed', 
-                    (snapshot) => {
-                        const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-                        setUploadProgress(progress);
-                    }, 
-                    (error) => {
-                        alert("影片上傳失敗！檔案可能過大。");
-                        setUploadProgress(0);
-                    }, 
-                    async () => {
-                        const downloadURL = await window.FB.getDownloadURL(uploadTask.snapshot.ref);
-                        setHeader(prev => ({...prev, videoLink: downloadURL}));
-                        setUploadProgress(0);
-                        alert("✅ 影片上傳完成！");
-                    }
-                );
-            };
-
-            const handleSync = async () => {
-                if (mode === "Local") return alert("目前為單機模式，請檢查網路。");
-                setIsLoading(true);
-                try {
-                    const appId = typeof __app_id !== 'undefined' ? __app_id : 'od-official-app';
-                    const docRef = window.FB.doc(db, 'artifacts', appId, 'public', 'data', 'cases', header.orderNo);
-                    await window.FB.setDoc(docRef, { ...header, items: measurements, updatedAt: new Date().toISOString() });
-                    alert("✅ 雲端同步成功！");
-                } catch (e) { alert("同步失敗"); }
-                finally { setIsLoading(false); }
-            };
-
-            const confirmDeleteHistory = async (orderNo) => {
-                if (!db) return;
-                setDeleteConfirm(null);
-                setIsLoading(true);
-                try {
-                    const appId = typeof __app_id !== 'undefined' ? __app_id : 'od-official-app';
-                    const docRef = window.FB.doc(db, 'artifacts', appId, 'public', 'data', 'cases', orderNo);
-                    await window.FB.deleteDoc(docRef);
-                } catch (error) { console.error("刪除失敗", error); } 
-                finally { setIsLoading(false); }
-            };
-
-            const loadCase = (c) => { 
-                setHeader({ ...c }); 
-                setMeasurements(c.items || []); 
-                setVideoUrl(null);
-                setView("main"); 
-            };
-
-            const handleUpdateRow = (id, field, val) => {
-                setMeasurements(prev => prev.map(m => {
-                    if (m.id === id) {
-                        let u = { ...m, [field]: val };
-                        if (field === 'w') u.dw = val ? parseInt(val) - 48 : 0;
-                        if (field === 'h') u.dh = val ? parseInt(val) - 30 : 0;
-                        return u;
-                    }
-                    return m;
-                }));
-            };
+            const FIREBASE_APP_ID = 'od-survey-system';
 
             const getLogoBase64 = async () => {
                 return new Promise((resolve) => {
@@ -336,19 +127,225 @@
                 });
             };
 
+            useEffect(() => {
+                getLogoBase64().then(url => setLogoImgBase64(url));
+
+                const init = async () => {
+                    try {
+                        if (!window.FB) return;
+                        const app = window.FB.initializeApp(firebaseConfig);
+                        const firestore = window.FB.getFirestore(app);
+                        const storageInstance = window.FB.getStorage(app);
+                        setDb(firestore);
+                        setStorage(storageInstance);
+                        setMode("Cloud");
+                        fetchHistory(firestore);
+                        setIsReady(true);
+                        const auth = window.FB.getAuth(app);
+                        window.FB.signInAnonymously(auth).catch(e => console.log("Auth skipped"));
+                    } catch (e) { 
+                        setMode("Local");
+                        setIsReady(true); 
+                    }
+                };
+                init();
+
+                if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+                    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                    recognitionRef.current = new SpeechRecognition();
+                    recognitionRef.current.continuous = true; 
+                    recognitionRef.current.interimResults = true; 
+                    recognitionRef.current.lang = 'zh-TW';
+                    recognitionRef.current.onresult = (e) => {
+                        let interim = "";
+                        let finalStr = "";
+                        for (let i = e.resultIndex; i < e.results.length; ++i) {
+                            if (e.results[i].isFinal) finalStr += e.results[i][0].transcript;
+                            else interim += e.results[i][0].transcript;
+                        }
+                        if (finalStr) transcriptAccumulator.current += finalStr + " ";
+                        setTranscript(transcriptAccumulator.current + interim);
+                    };
+                    recognitionRef.current.onend = () => {
+                        if (isRecording) { try { recognitionRef.current.start(); } catch(e){} }
+                    };
+                }
+            }, []);
+
+            useEffect(() => {
+                let interval;
+                if (isRecording) interval = setInterval(() => setTimer(prev => prev + 1), 1000);
+                else clearInterval(interval);
+                return () => clearInterval(interval);
+            }, [isRecording]);
+
+            const fetchHistory = (fdb) => {
+                try {
+                    const colRef = window.FB.collection(fdb, 'artifacts', FIREBASE_APP_ID, 'public', 'data', 'cases');
+                    window.FB.onSnapshot(colRef, (snap) => {
+                        const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                        setAllCases(list.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)));
+                    });
+                } catch(e){}
+            };
+
+            const parseSpeech = async (text) => {
+                if (!text.trim() || !apiKey) return;
+                setIsLoading(true);
+                const prompt = `你是一個專業裝潢丈量助理。請將語音解析為 JSON。
+                1. 如果提到地址、備註、注意事項、或五金零件(防撞條、鉸鏈、門止、把手)，放入 "header" 對象中。
+                2. 如果提到尺寸數據，放入 "items" 陣列中。
+                3. 計算規則：門寬=洞寬-48, 門高=洞高-30。
+                
+                輸出格式範例：
+                {
+                    "header": { "address": "...", "precautions": "...", "partHandle": "..." },
+                    "items": [ { "no": "1.", "w": 898, "h": 2190, "t": 125, "note": "..." } ]
+                }
+                語音內容：${text}
+                只回傳 JSON，不要廢話。`;
+
+                try {
+                    const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+                    });
+                    const data = await resp.json();
+                    const clean = data.candidates[0].content.parts[0].text.replace(/```json|```/g, "").trim();
+                    const p = JSON.parse(clean);
+                    
+                    if (p.header) {
+                        setHeader(prev => ({ ...prev, ...p.header }));
+                    }
+
+                    if (p.items && p.items.length > 0) {
+                        setMeasurements(prev => {
+                            const newItems = p.items.map((item, idx) => ({
+                                id: Date.now() + Math.random(),
+                                no: item.no || (prev.length + idx + 1) + ".",
+                                w: parseInt(item.w) || 0, h: parseInt(item.h) || 0, 
+                                dw: item.w ? parseInt(item.w) - 48 : 0, 
+                                dh: item.h ? parseInt(item.h) - 30 : 0, 
+                                t: parseInt(item.t) || 0,
+                                note: item.note || "",
+                                style: "房", stop: "隱", base: ""
+                            }));
+                            return [...prev, ...newItems];
+                        });
+                    }
+                } catch (e) { alert("AI 解析失敗，請手動確認。"); }
+                finally { 
+                    setIsLoading(false); 
+                    transcriptAccumulator.current = "";
+                    setTranscript("");
+                }
+            };
+
+            const toggleRecording = () => {
+                if (!recognitionRef.current) return alert("瀏覽器不支援語音");
+                if (isRecording) {
+                    recognitionRef.current.stop();
+                    setIsRecording(false);
+                    if (apiKey) parseSpeech(transcriptAccumulator.current);
+                } else {
+                    transcriptAccumulator.current = "";
+                    setTranscript("");
+                    try {
+                        recognitionRef.current.start();
+                        setIsRecording(true);
+                        setTimer(0);
+                    } catch (e) { console.log(e); }
+                }
+            };
+
+            const handleVideoSelect = (e) => {
+                const file = e.target.files[0];
+                if (!file || !storage) return;
+                setVideoUrl(URL.createObjectURL(file));
+                const storageRef = window.FB.ref(storage, `artifacts/${FIREBASE_APP_ID}/videos/${header.orderNo}_${Date.now()}`);
+                const uploadTask = window.FB.uploadBytesResumable(storageRef, file);
+                uploadTask.on('state_changed', (snap) => setUploadProgress((snap.bytesTransferred / snap.totalBytes) * 100), 
+                    () => { alert("影片上傳失敗"); setUploadProgress(0); }, 
+                    async () => {
+                        const url = await window.FB.getDownloadURL(uploadTask.snapshot.ref);
+                        setHeader(prev => ({...prev, videoLink: url}));
+                        setUploadProgress(0);
+                        alert("✅ 影片同步完成");
+                    }
+                );
+            };
+
+            const handleSync = async () => {
+                if (!db) return alert("雲端未連通");
+                setIsLoading(true);
+                try {
+                    const docRef = window.FB.doc(db, 'artifacts', FIREBASE_APP_ID, 'public', 'data', 'cases', header.orderNo);
+                    await window.FB.setDoc(docRef, { ...header, items: measurements, updatedAt: new Date().toISOString() });
+                    alert("✅ 同步成功");
+                } catch (e) { alert("同步失敗"); }
+                finally { setIsLoading(false); }
+            };
+
+            const confirmDeleteHistory = async (orderNo) => {
+                if (!db) return;
+                setDeleteConfirm(null);
+                setIsLoading(true);
+                try {
+                    await window.FB.deleteDoc(window.FB.doc(db, 'artifacts', FIREBASE_APP_ID, 'public', 'data', 'cases', orderNo));
+                } catch (e) { console.error(e); } 
+                finally { setIsLoading(false); }
+            };
+
+            const loadCase = (c) => { 
+                setHeader({ ...c }); 
+                setMeasurements(c.items || []); 
+                setVideoUrl(null); 
+                setView("main"); 
+            };
+
+            const handleUpdateRow = (id, field, val) => {
+                setMeasurements(prev => prev.map(m => {
+                    if (m.id === id) {
+                        let u = { ...m, [field]: val };
+                        if (field === 'w') u.dw = val ? parseInt(val) - 48 : 0;
+                        if (field === 'h') u.dh = val ? parseInt(val) - 30 : 0;
+                        return u;
+                    }
+                    return m;
+                }));
+            };
+
+            const addRow = () => {
+                setMeasurements(prev => [
+                    ...prev, 
+                    { 
+                        id: Date.now() + Math.random(), 
+                        no: (prev.length + 1) + ".", 
+                        w: 0, h: 0, dw: 0, dh: 0, t: 0, body: 0, trim: 50, note: "", style: "房" 
+                    }
+                ]);
+            };
+
+            // 💎 徹底修復 Merge Overlap 問題，確保網格獨立不干擾
             const exportExcel = async () => {
                 setIsLoading(true);
                 try {
                     const workbook = new window.ExcelJS.Workbook();
                     const sheet = workbook.addWorksheet('下料單');
+
                     sheet.columns = [
                         { width: 8 }, { width: 10 }, { width: 10 }, { width: 10 }, { width: 10 },
                         { width: 8 }, { width: 8 }, { width: 8 }, { width: 30 }, { width: 7 },
                         { width: 7 }, { width: 7 }
                     ];
-                    const thin = { style:'thin' };
-                    const borderAll = { top: thin, left: thin, bottom: thin, right: thin };
 
+                    const borderAll = { 
+                        top: {style:'thin'}, left: {style:'thin'}, 
+                        bottom: {style:'thin'}, right: {style:'thin'} 
+                    };
+
+                    // 1. 頂部頁籤 (Row 1)
                     const tabs = ["工單扣法", "尺寸單(榮豐)", "採購單(框)", "採購單(門)", "尺寸單", "合約(未稅)"];
                     tabs.forEach((t, i) => {
                         const cell = sheet.getCell(1, i * 2 + 1);
@@ -358,33 +355,50 @@
                         sheet.mergeCells(1, i*2+1, 1, i*2+2);
                     });
 
+                    // 2. 完美 Logo (Row 2-4)
                     sheet.mergeCells('A2:A4');
-                    const logoData = await getLogoBase64();
-                    const imageId = workbook.addImage({ base64: logoData, extension: 'png' });
-                    sheet.addImage(imageId, { tl: { col: 0, row: 1 }, br: { col: 1, row: 4 } });
+                    if (logoImgBase64) {
+                        const imageId = workbook.addImage({ base64: logoImgBase64, extension: 'png' });
+                        sheet.addImage(imageId, { tl: { col: 0, row: 1 }, br: { col: 1, row: 4 } });
+                    }
                     sheet.getCell('A2').border = borderAll;
+                    sheet.getCell('A2').value = ""; // 清空文字
 
+                    // 3. 標題與訂單資訊 (Row 2-4)
                     sheet.mergeCells('B3:H4');
                     const title = sheet.getCell('B3');
                     title.value = '下 料 單'; title.font = { size: 24, bold: true };
                     title.alignment = { vertical:'middle', horizontal:'center' };
-                    sheet.getCell('I3').value = '訂單編號:'; sheet.getCell('J3').value = header.orderNo;
-                    sheet.getCell('I4').value = '丈量人員:'; sheet.getCell('J4').value = header.surveyor;
+                    
+                    sheet.getCell('I3').value = '訂單編號:'; 
+                    sheet.mergeCells('J3:L3'); sheet.getCell('J3').value = header.orderNo;
+                    
+                    sheet.getCell('I4').value = '丈量人員:'; 
+                    sheet.mergeCells('J4:L4'); sheet.getCell('J4').value = header.surveyor;
 
-                    const meta = [
-                        {a:'公    司:', d:header.company, i:'丈量日期:', j:new Date().toLocaleDateString()},
-                        {a:'聯 絡 人:', d:header.contact, g:'電話:', h:header.phone},
-                        {a:'案場地址:', d:header.address}
-                    ];
-                    meta.forEach((m, idx) => {
-                        const r = 5 + idx;
-                        sheet.mergeCells(`A${r}:C${r}`); sheet.getCell(`A${r}`).value = m.a;
-                        sheet.mergeCells(`D${r}:F${r}`); sheet.getCell(`D${r}`).value = m.d;
-                        if(m.i) { sheet.getCell(`I${r}`).value = m.i; sheet.getCell(`J${r}`).value = m.j; }
-                        if(m.g) { sheet.getCell(`G${r}`).value = m.g; sheet.getCell(`H${r}`).value = m.h; }
-                        sheet.getRow(r).eachCell(c => c.border = borderAll);
-                    });
+                    // 4. 基本資訊 (Row 5-7) - 嚴格劃分儲存格避免覆蓋
+                    // Row 5
+                    sheet.mergeCells('A5:C5'); sheet.getCell('A5').value = '公    司:';
+                    sheet.mergeCells('D5:F5'); sheet.getCell('D5').value = header.company || '';
+                    sheet.getCell('I5').value = '丈量日期:'; 
+                    sheet.mergeCells('J5:L5'); sheet.getCell('J5').value = new Date().toLocaleDateString();
+                    
+                    // Row 6
+                    sheet.mergeCells('A6:C6'); sheet.getCell('A6').value = '聯 絡 人:';
+                    sheet.mergeCells('D6:F6'); sheet.getCell('D6').value = header.contact || '';
+                    sheet.mergeCells('G6:H6'); sheet.getCell('G6').value = '電話:';
+                    sheet.mergeCells('I6:L6'); sheet.getCell('I6').value = header.phone || '';
+                    
+                    // Row 7
+                    sheet.mergeCells('A7:C7'); sheet.getCell('A7').value = '案場地址:';
+                    sheet.mergeCells('D7:L7'); sheet.getCell('D7').value = header.address || '';
+                    
+                    // Apply borders Row 5-7
+                    for(let r=5; r<=7; r++) {
+                        for(let c=1; c<=12; c++) { sheet.getCell(r, c).border = borderAll; }
+                    }
 
+                    // 5. 橘色樣式區 (Row 9)
                     sheet.getRow(9).height = 30;
                     sheet.mergeCells('A9:B9'); sheet.getCell('A9').value = "門框樣式:";
                     sheet.mergeCells('C9:F9'); sheet.getCell('C9').value = header.frameStyle;
@@ -393,6 +407,7 @@
                     ['A9','G9'].forEach(c => sheet.getCell(c).fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FFFDE9D9'} });
                     ['C9','I9'].forEach(c => { sheet.getCell(c).fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FFF4B084'} }; sheet.getCell(c).font = { bold:true, size:14 }; });
 
+                    // 6. 尺寸主表標題 (Row 11)
                     const hRow = sheet.getRow(11);
                     hRow.values = ['編號','洞寬','洞高','門寬','門高','牆厚','主體','線板','備註','樣式','門止','底'];
                     hRow.eachCell(c => { c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFF2F2F2'}}; c.border=borderAll; c.alignment={horizontal:'center'}; c.font={bold:true}; });
@@ -400,10 +415,11 @@
                     let cur = 12;
                     measurements.forEach((m) => {
                         const r = sheet.getRow(cur++);
-                        r.values = [m.no, m.w, m.h, m.dw, m.dh, m.t, m.t, 50, m.note, m.style, '隱', ''];
+                        r.values = [m.no, m.w, m.h, m.dw, m.dh, m.t, m.body || m.t, m.trim || 50, m.note, m.style || "房", m.stop || "隱", m.base || ""];
                         r.eachCell(c => { c.border=borderAll; c.alignment={horizontal:'center', vertical:'middle'}; if(c.column===9) c.font={color:{argb:'FFFF0000'}, bold:true}; });
                     });
 
+                    // 7. 精密網格標頭
                     const footStart = cur + 1;
                     sheet.mergeCells(`A${footStart}:D${footStart}`); 
                     sheet.getCell(`A${footStart}`).value = "框門注意事項: " + header.precautions;
@@ -413,23 +429,26 @@
 
                     const redR = footStart + 1;
                     
+                    // 🌟 左半部：灰底案場總結，佔用 A~D 欄 (共5列對齊右邊)
                     const firstM = measurements[0] || {};
-                    const summary = `${firstM.w||0}/${firstM.h||0}/${firstM.t||0}/${firstM.style||'房'}/${firstM.stop||'隱'}/地板確認`;
+                    const mw = firstM.w || 0; const mh = firstM.h || 0; const mt = firstM.t || 0;
+                    const summary = `${mw}/${mh}/${mt}/房/隱/地板確認`;
                     
-                    sheet.mergeCells(`A${redR}:D${redR}`); sheet.getCell(`A${redR}`).value = header.address;
-                    sheet.mergeCells(`A${redR+1}:D${redR+1}`); sheet.getCell(`A${redR+1}`).value = summary;
-                    sheet.mergeCells(`A${redR+2}:D${redR+2}`); sheet.getCell(`A${redR+2}`).value = "門下大陸/框可以工廠切好";
+                    sheet.mergeCells(`A${redR}:D${redR+1}`); sheet.getCell(`A${redR}`).value = header.address;
+                    sheet.mergeCells(`A${redR+2}:D${redR+3}`); sheet.getCell(`A${redR+2}`).value = summary;
+                    sheet.mergeCells(`A${redR+4}:D${redR+4}`); sheet.getCell(`A${redR+4}`).value = "門下大陸/框可以工廠切好";
                     
-                    for(let r=redR; r<=redR+2; r++) {
-                        sheet.getCell(`A${r}`).alignment = { vertical:'middle', horizontal:'left' };
-                        sheet.getCell(`A${r}`).font = { size: 10, color: { argb: 'FF555555' } };
+                    for(let r=redR; r<=redR+4; r++) {
                         for(let c=1; c<=4; c++) {
                             const cell = sheet.getCell(r, c);
                             cell.fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FFE7E6E6'} };
                             cell.border = borderAll;
                         }
+                        sheet.getCell(`A${r}`).alignment = { vertical:'middle', horizontal:'left', wrapText: true };
+                        sheet.getCell(`A${r}`).font = { size: 10, color: { argb: 'FF555555' } };
                     }
 
+                    // 🌟 右半部：紅字警示區，佔用 E~L 欄 (共5列)
                     sheet.mergeCells(`E${redR}:L${redR+4}`);
                     const redC = sheet.getCell(`E${redR}`);
                     redC.value = header.redNotice;
@@ -439,15 +458,23 @@
                         for(let c=5; c<=12; c++) { sheet.getCell(r, c).border = borderAll; }
                     }
 
+                    // 🌟 底部：五金網格 4 格資料行，只在 E~L 欄
                     const pR = redR + 5;
                     const partsH = ["防撞條", "鉸鏈", "門止", "把手"];
-                    const partsV = [(header.partCollision||"").split('\n'), (header.partHinge||"").split('\n'), (header.partStop||"").split('\n'), (header.partHandle||"").split('\n')];
+                    const partsV = [
+                        (header.partCollision||"").split('\n'),
+                        (header.partHinge||"").split('\n'),
+                        (header.partStop||"").split('\n'),
+                        (header.partHandle||"").split('\n')
+                    ];
+
                     partsH.forEach((p, i) => {
-                        const sCol = i*2 + 5;
+                        const sCol = i*2 + 5; // 精確計算: 5(E), 7(G), 9(I), 11(K)
                         sheet.mergeCells(pR, sCol, pR, sCol+1);
                         const head = sheet.getCell(pR, sCol);
                         head.value = p; head.alignment={horizontal:'center'}; head.font={bold:true};
                     });
+
                     for(let rowOffset=1; rowOffset<=4; rowOffset++) {
                         partsV.forEach((lines, i) => {
                             const sCol = i*2 + 5;
@@ -457,13 +484,16 @@
                             val.alignment={horizontal:'center', vertical:'middle'};
                         });
                     }
+
+                    // 畫五金區的框線
                     for(let r=pR; r<=pR+4; r++) {
                         for(let c=5; c<=12; c++) { sheet.getCell(r, c).border = borderAll; }
                     }
 
+                    // 8. 底部簽名
                     const fin = pR + 5;
                     sheet.mergeCells(`E${fin}:H${fin}`);
-                    sheet.getCell(`E${fin}`).value = "訂金: " + header.deposit;
+                    sheet.getCell(`E${fin}`).value = "訂金: " + (header.deposit || "0");
                     sheet.mergeCells(`I${fin}:L${fin}`);
                     sheet.getCell(`I${fin}`).value = "審核人簽章: ";
                     for(let c=5; c<=12; c++) { sheet.getCell(fin, c).border = borderAll; }
@@ -471,12 +501,17 @@
                     const buffer = await workbook.xlsx.writeBuffer();
                     const link = document.createElement("a");
                     link.href = URL.createObjectURL(new Blob([buffer]));
-                    link.download = `歐德下料單_${header.orderNo}.xlsx`;
+                    link.download = `歐德專用下料單_${header.orderNo}.xlsx`;
                     link.click();
-                } catch(e) { alert("導出失敗"); } finally { setIsLoading(false); }
+                } catch(e) {
+                    console.error("Excel Generation Error: ", e);
+                    alert("導出失敗，請確認欄位格式");
+                } finally {
+                    setIsLoading(false);
+                }
             };
 
-            if (!isReady) return <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white italic font-black text-3xl uppercase tracking-widest">系統啟動中...</div>;
+            if (!isReady) return <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white italic font-black text-3xl uppercase animate-pulse">系統啟動中...</div>;
 
             return (
                 <div className="min-h-screen flex flex-col pb-20 relative">
@@ -493,16 +528,23 @@
                         </div>
                     )}
 
-                    <nav className="bg-slate-900 text-white p-5 shadow-xl sticky top-0 z-50">
-                        <div className="max-w-7xl mx-auto flex justify-between items-center">
-                            <div className="flex items-center gap-3" onClick={() => setView("main")}>
-                                <div className="bg-blue-600 p-2 rounded-lg shadow-lg"><Icon name="shield-check" className="w-7 h-7" /></div>
-                                <div><h1 className="text-2xl font-black italic tracking-tighter uppercase leading-none">智揚助理</h1><span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{mode} Mode</span></div>
+                    <nav className="bg-slate-900 text-white p-5 shadow-xl sticky top-0 z-50 flex justify-between items-center">
+                        <div className="flex items-center gap-3" onClick={() => setView("main")}>
+                            {logoImgBase64 ? (
+                                <div className="bg-white p-1 rounded-xl shadow-lg">
+                                    <img src={logoImgBase64} alt="Logo" className="w-10 h-10 object-contain" />
+                                </div>
+                            ) : (
+                                <div className="bg-blue-600 p-2 rounded-lg shadow-lg"><Icon name="shield-check" className="w-6 h-6" /></div>
+                            )}
+                            <div>
+                                <h1 className="text-2xl font-black italic tracking-tighter uppercase leading-none">丈量尺寸</h1>
+                                <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">{mode} Mode</span>
                             </div>
-                            <div className="flex gap-3">
-                                <button onClick={() => setView(view === 'main' ? 'history' : 'main')} className="bg-slate-800 text-white px-5 py-3 rounded-2xl text-sm font-black flex items-center gap-2"><Icon name={view === 'main' ? "list" : "chevron-left"} className="w-5 h-5" /> {view === 'main' ? "歷史紀錄" : "返回"}</button>
-                                <button onClick={handleSync} className="bg-blue-600 text-white px-5 py-3 rounded-2xl text-sm font-black shadow-lg">同步雲端</button>
-                            </div>
+                        </div>
+                        <div className="flex gap-3">
+                            <button onClick={() => setView(view === 'main' ? 'history' : 'main')} className="bg-slate-800 text-white px-5 py-3 rounded-2xl text-sm font-black flex items-center gap-2 transition-all"><Icon name={view === 'main' ? "list" : "chevron-left"} className="w-5 h-5" /> {view === 'main' ? "紀錄" : "返回"}</button>
+                            <button onClick={handleSync} className="bg-blue-600 text-white px-5 py-3 rounded-2xl text-sm font-black shadow-lg">同步雲端</button>
                         </div>
                     </nav>
 
@@ -510,60 +552,41 @@
                         <main className="p-4 lg:p-8 max-w-7xl mx-auto w-full space-y-8">
                             <div className="card p-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-8">
                                 <div className="space-y-2">
-                                    <label className="text-xs font-black text-slate-400 uppercase tracking-widest">訂單編號</label>
+                                    <label className="text-xs font-black text-slate-400 uppercase">訂單編號</label>
                                     <input value={header.orderNo} onChange={e=>setHeader({...header, orderNo: e.target.value})} className="w-full border-b-2 p-2 text-2xl font-black text-blue-600 outline-none" />
                                 </div>
                                 <div className="lg:col-span-2 space-y-2">
-                                    <label className="text-xs font-black text-slate-400 uppercase tracking-widest">案場地址</label>
+                                    <label className="text-xs font-black text-slate-400 uppercase">案場地址 (可用語音輸入)</label>
                                     <input value={header.address} onChange={e=>setHeader({...header, address: e.target.value})} className="w-full border-b-2 p-2 text-2xl font-bold outline-none" />
                                 </div>
                                 <div className="space-y-2 text-center">
-                                    <label className="text-xs font-black text-slate-400 uppercase text-red-500 flex items-center justify-center gap-2 tracking-widest"><Icon name="video" className="w-4 h-4" /> 現場影片</label>
-                                    <button onClick={()=>fileInputRef.current.click()} className="w-full bg-slate-50 py-3 rounded-2xl text-sm font-black border flex items-center justify-center gap-2 transition-all">
-                                        {uploadProgress > 0 && uploadProgress < 100 ? <div className="w-5 h-5 border-3 border-blue-500 border-t-transparent rounded-full animate-spin"></div> : 
-                                         header.videoLink ? <Icon name="check-circle-2" className="w-5 h-5 text-emerald-500" /> : <Icon name="upload" className="w-5 h-5" />}
-                                        {uploadProgress > 0 && uploadProgress < 100 ? `${Math.round(uploadProgress)}%` : header.videoLink ? "影片已同步" : "上傳影片"}
+                                    <label className="text-xs font-black text-slate-400 uppercase text-red-500">影片同步</label>
+                                    <button onClick={()=>fileInputRef.current.click()} className="w-full bg-slate-50 py-3 rounded-2xl text-sm font-black border flex items-center justify-center gap-2">
+                                        {uploadProgress > 0 ? `${Math.round(uploadProgress)}%` : (header.videoLink ? <Icon name="check" className="w-4 h-4 text-emerald-500"/> : "上傳影片")}
                                     </button>
                                     <input type="file" ref={fileInputRef} hidden accept="video/*" onChange={handleVideoSelect} />
                                 </div>
-                                <button onClick={exportExcel} className="bg-emerald-600 text-white py-3 rounded-xl text-sm font-black shadow-lg flex items-center justify-center gap-2 mt-auto active:scale-95 transition-all"><Icon name="file-spreadsheet" className="w-6 h-6" /> 導出 Excel</button>
+                                <button onClick={exportExcel} className="bg-emerald-600 text-white py-3 rounded-xl text-sm font-black shadow-lg mt-auto active:scale-95 transition-all">導出 Excel</button>
                             </div>
 
-                            {videoUrl && (
-                                <div className="bg-black rounded-[2.5rem] overflow-hidden shadow-2xl aspect-video max-w-3xl mx-auto border-8 border-white relative group">
-                                    <video src={videoUrl} controls className="w-full h-full object-cover"></video>
-                                    <button onClick={() => {setVideoUrl(null); setHeader({...header, videoLink: ''});}} className="absolute top-6 right-6 bg-white/20 hover:bg-red-500 text-white p-4 rounded-full backdrop-blur-md transition-all shadow-xl"><Icon name="trash-2" className="w-7 h-7" /></button>
-                                </div>
-                            )}
-
-                            <div className="bg-orange-50 rounded-[2rem] p-8 border border-orange-100 grid grid-cols-2 gap-8">
-                                <div className="space-y-2">
-                                    <label className="text-xs font-black text-orange-400 uppercase tracking-widest">門框樣式</label>
-                                    <input value={header.frameStyle} onChange={e=>setHeader({...header, frameStyle:e.target.value})} className="w-full bg-transparent border-b-2 border-orange-200 p-2 text-2xl font-bold text-orange-900 outline-none" />
-                                </div>
-                                <div className="space-y-2">
-                                    <label className="text-xs font-black text-orange-400 uppercase tracking-widest">門片樣式</label>
-                                    <input value={header.doorStyle} onChange={e=>setHeader({...header, doorStyle:e.target.value})} className="w-full bg-transparent border-b-2 border-orange-200 p-2 text-2xl font-bold text-orange-900 outline-none" />
-                                </div>
-                            </div>
-
-                            <div className="bg-slate-900 rounded-[3.5rem] p-10 text-center relative overflow-hidden shadow-2xl border-8 border-white">
-                                {isLoading && <div className="absolute inset-0 bg-slate-900/95 z-30 flex items-center justify-center"><Icon name="loader-2" className="animate-spin text-blue-500 w-20 h-20" /></div>}
-                                <button onClick={toggleRecording} className={`w-36 h-36 rounded-full flex items-center justify-center mx-auto transition-all border-[12px] border-slate-800 shadow-2xl ${isRecording ? 'record-pulse' : 'bg-white hover:scale-105'}`}>
-                                    {isRecording ? <div className="w-12 h-12 bg-white rounded-lg"></div> : <Icon name="mic" className="w-20 h-20 text-slate-900" />}
+                            <div className="bg-slate-900 rounded-[3.5rem] p-12 text-center relative overflow-hidden shadow-2xl border-8 border-white">
+                                {isLoading && <div className="absolute inset-0 bg-slate-900/95 z-30 flex flex-col items-center justify-center"><Icon name="loader-2" className="animate-spin text-blue-500 w-20 h-20 mb-4" /><p className="text-blue-400 font-black tracking-widest text-lg animate-pulse uppercase">AI 智慧解析中...</p></div>}
+                                <button onClick={toggleRecording} className={`w-40 h-40 rounded-full flex items-center justify-center mx-auto transition-all border-[14px] border-slate-800 shadow-2xl ${isRecording ? 'record-pulse' : 'bg-white hover:scale-105'}`}>
+                                    {isRecording ? <div className="w-12 h-12 bg-white rounded-xl"></div> : <Icon name="mic" className="w-20 h-20 text-slate-900" />}
                                 </button>
-                                {transcript && <p className="mt-8 text-white/50 text-sm font-bold tracking-widest italic">「{transcript}」</p>}
+                                {transcript && <p className="mt-8 text-white/40 text-sm font-bold tracking-widest italic leading-relaxed px-6">「 {transcript} 」</p>}
+                                <p className="mt-4 text-slate-500 text-xs font-black uppercase">可同時報地址、備註、零件、尺寸</p>
                             </div>
 
                             <div className="card overflow-hidden">
                                 <div className="p-6 bg-slate-50 border-b flex justify-between items-center">
-                                    <h3 className="section-title">尺寸明細 ({measurements.length} 樘)</h3>
-                                    <button onClick={() => setMeasurements([...measurements, { id: Date.now(), no: (measurements.length+1)+".", w:0, h:0, dw:0, dh:0, t:0, body:0, trim:50, note:"" }])} className="bg-indigo-600 text-white px-6 py-3 rounded-2xl text-sm font-black shadow-lg">+ 手動新增</button>
+                                    <h3 className="section-title italic">Zhiyang Order List</h3>
+                                    <button onClick={addRow} className="bg-indigo-600 text-white px-6 py-3 rounded-2xl text-sm font-black active:scale-95 transition-all">+ 手動新增</button>
                                 </div>
                                 <div className="overflow-x-auto virtual-list">
-                                    <table className="w-full text-left min-w-[1000px] border-separate border-spacing-0">
-                                        <thead className="bg-slate-50 text-sm text-slate-400 font-black uppercase sticky top-0 z-20 shadow-sm">
-                                            <tr><th className="px-8 py-6">編號</th><th className="px-4 py-6">洞寬</th><th className="px-4 py-6">洞高</th><th className="px-4 py-6 text-emerald-600 border-x">門寬</th><th className="px-4 py-6 text-emerald-600 border-r">門高</th><th className="px-4 py-6 text-center">牆厚</th><th className="px-8 py-6">備註 / 樣式</th><th className="px-4 py-6"></th></tr>
+                                    <table className="w-full text-left min-w-[1100px] border-separate border-spacing-0">
+                                        <thead className="bg-slate-50 text-sm text-slate-400 font-black uppercase sticky top-0 z-20 shadow-sm border-b">
+                                            <tr><th className="px-8 py-6">編號</th><th className="px-4 py-6 text-blue-700">洞寬</th><th className="px-4 py-6 text-blue-700">洞高</th><th className="px-4 py-6 text-emerald-600 border-x">門寬</th><th className="px-4 py-6 text-emerald-600 border-r">門高</th><th className="px-4 py-6">牆厚</th><th className="px-8 py-6">備註 / 樣式</th><th className="px-4 py-6"></th></tr>
                                         </thead>
                                         <tbody className="divide-y divide-slate-100">
                                             {measurements.map(m => (
@@ -587,39 +610,35 @@
                             </div>
 
                             <div className="card p-10 space-y-10">
-                                <h3 className="section-title">五金配件與精密備註</h3>
+                                <h3 className="section-title uppercase tracking-widest">五金零件與案場備註</h3>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
                                     <div className="space-y-6">
-                                        <div className="space-y-2"><label className="text-xs font-black text-blue-500 uppercase tracking-widest">框門注意事項</label><textarea rows="2" value={header.precautions} onChange={e=>setHeader({...header, precautions:e.target.value})} className="w-full bg-slate-50 border rounded-2xl p-5 text-xl font-bold resize-none" /></div>
-                                        <div className="space-y-2"><label className="text-xs font-black text-blue-500 uppercase tracking-widest">訂單備註</label><textarea rows="2" value={header.orderRemark} onChange={e=>setHeader({...header, orderRemark:e.target.value})} className="w-full bg-slate-50 border rounded-2xl p-5 text-xl font-bold resize-none" /></div>
+                                        <div className="space-y-2"><label className="text-xs font-black text-blue-500 uppercase">框門注意事項</label><textarea rows="2" value={header.precautions} onChange={e=>setHeader({...header, precautions:e.target.value})} className="w-full bg-slate-50 border rounded-2xl p-5 text-xl font-bold resize-none" /></div>
+                                        <div className="space-y-2"><label className="text-xs font-black text-blue-500 uppercase">訂單備註</label><textarea rows="2" value={header.orderRemark} onChange={e=>setHeader({...header, orderRemark:e.target.value})} className="w-full bg-slate-50 border rounded-2xl p-5 text-xl font-bold resize-none" /></div>
                                     </div>
-                                    <div className="space-y-2"><label className="text-xs font-black text-red-500 italic font-black uppercase tracking-widest">大紅字警示區</label><textarea rows="5" value={header.redNotice} onChange={e=>setHeader({...header, redNotice:e.target.value})} className="w-full bg-red-50/30 border border-red-100 rounded-[2.5rem] p-6 text-red-600 font-black text-4xl text-center resize-none leading-relaxed shadow-inner" /></div>
+                                    <div className="space-y-2"><label className="text-xs font-black text-red-500 italic font-black uppercase">大紅字警示區</label><textarea rows="5" value={header.redNotice} onChange={e=>setHeader({...header, redNotice:e.target.value})} className="w-full bg-red-50/30 border border-red-100 rounded-[2.5rem] p-6 text-red-600 font-black text-4xl text-center resize-none leading-relaxed shadow-inner" /></div>
                                 </div>
                                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-8">
                                     {['partCollision','partHinge','partStop','partHandle'].map((key, i) => (
                                         <div key={key} className="bg-slate-50 p-6 rounded-3xl border border-slate-200 shadow-sm">
-                                            <label className="text-xs font-black text-slate-400 mb-3 block uppercase tracking-widest">{['防撞條','鉸鏈','門止','把手'][i]}</label>
+                                            <label className="text-xs font-black text-slate-400 mb-3 block uppercase">{['防撞條','鉸鏈','門止','把手'][i]}</label>
                                             <textarea rows="4" value={header[key]} onChange={e=>setHeader({...header, [key]:e.target.value})} className="w-full bg-white border rounded-2xl p-4 text-2xl font-black outline-none resize-none text-center leading-loose text-slate-700 shadow-inner" placeholder="換行對應網格" />
                                         </div>
                                     ))}
-                                </div>
-                                <div className="flex justify-end gap-6 items-center pt-10 border-t border-slate-100">
-                                    <label className="text-2xl font-black text-slate-600">訂金金額 (Deposit):</label>
-                                    <input type="number" value={header.deposit} onChange={e=>setHeader({...header, deposit: e.target.value})} className="w-48 bg-slate-100 border-none p-5 rounded-2xl text-right font-black text-blue-600 text-4xl shadow-inner" />
                                 </div>
                             </div>
                         </main>
                     ) : (
                         <main className="p-4 lg:p-8 max-w-5xl mx-auto w-full">
                             <div className="card">
-                                <div className="p-8 bg-slate-900 text-white flex justify-between items-center rounded-t-[2.5rem]"><h3 className="font-black italic uppercase text-2xl tracking-widest">雲端存檔歷史紀錄</h3><span className="bg-blue-600 px-4 py-1 rounded-full text-xs font-black">{allCases.length} 案存檔</span></div>
+                                <div className="p-8 bg-slate-900 text-white flex justify-between items-center rounded-t-[2.5rem]"><h3 className="font-black italic uppercase text-2xl tracking-widest">存檔歷史紀錄</h3><span className="bg-blue-600 px-4 py-1 rounded-full text-xs font-black">{allCases.length} 案存檔</span></div>
                                 <div className="divide-y divide-slate-100">
                                     {allCases.map(c => (
                                         <div key={c.id} className="p-8 hover:bg-slate-50 transition-all flex justify-between items-center cursor-pointer group" onClick={() => loadCase(c)}>
                                             <div className="space-y-1">
-                                                <p className="text-blue-600 font-black text-3xl mb-1 tracking-tighter">{c.orderNo}</p>
+                                                <p className="text-blue-600 font-black text-3xl tracking-tighter">{c.orderNo}</p>
                                                 <p className="text-xl font-bold text-slate-500">{c.address}</p>
-                                                <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mt-2">同步時間: {new Date(c.updatedAt).toLocaleString()}</p>
+                                                <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">同步時間: {new Date(c.updatedAt).toLocaleString()}</p>
                                             </div>
                                             <div className="flex items-center gap-10">
                                                 <button onClick={(e) => { e.stopPropagation(); setDeleteConfirm(c.orderNo); }} className="p-4 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-2xl transition-all opacity-0 group-hover:opacity-100"><Icon name="trash-2" className="w-10 h-10" /></button>
@@ -627,12 +646,10 @@
                                             </div>
                                         </div>
                                     ))}
-                                    {allCases.length === 0 && <div className="p-32 text-center text-slate-300 font-black uppercase tracking-[0.5em] italic">No History Found</div>}
                                 </div>
                             </div>
                         </main>
                     )}
-                    <footer className="text-center py-10 opacity-20 text-[10px] font-black uppercase tracking-[0.8em] mt-auto">ZHIYANG PRO v14.0 - Official Admin</footer>
                 </div>
             );
         };
