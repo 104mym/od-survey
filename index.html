@@ -57,7 +57,7 @@
             return <span ref={ref} className="inline-flex items-center justify-center" />;
         };
 
-        const apiKey = ""; // Gemini API 密鑰
+        const apiKey = ""; // Gemini API 密鑰 (執行環境會自動提供，無需手動填寫)
 
         const App = () => {
             const [view, setView] = useState("main"); 
@@ -190,7 +190,8 @@
             };
 
             const parseSpeech = async (text) => {
-                if (!text.trim() || !apiKey) return;
+                // 移除了 apiKey 的驗證，確保在 Canvas 環境中能夠正常觸發請求
+                if (!text.trim()) return;
                 setIsLoading(true);
                 const prompt = `你是一個專業裝潢丈量助理。請將語音解析為 JSON。
                 1. 如果提到地址、備註、注意事項、或五金零件(防撞條、鉸鏈、門止、把手)，放入 "header" 對象中。
@@ -249,7 +250,10 @@
                 if (isRecording) {
                     recognitionRef.current.stop();
                     setIsRecording(false);
-                    if (apiKey) parseSpeech(transcriptAccumulator.current);
+                    // 確保只要有累積語音就進行解析，不檢查 apiKey 變數
+                    if (transcriptAccumulator.current) {
+                        parseSpeech(transcriptAccumulator.current);
+                    }
                 } else {
                     transcriptAccumulator.current = "";
                     setTranscript("");
@@ -266,37 +270,28 @@
                 if (!file) return;
                 setVideoUrl(URL.createObjectURL(file));
 
-                if (!storage) {
-                    alert("⚠️ 雲端儲存空間未連線，無法上傳影片。");
+                if (!storage || mode === "Local") {
+                    alert("目前為本地模式。請手動上傳後貼上網址，或連線雲端後上傳。");
                     return;
                 }
 
-                setUploadProgress(0.1); // 給出即時反饋
-
-                // 更安全的儲存路徑，避免權限問題
-                const storageRef = window.FB.ref(storage, `artifacts/${FIREBASE_APP_ID}/public/data/videos/${header.orderNo}_${Date.now()}`);
+                const storageRef = window.FB.ref(storage, `artifacts/${FIREBASE_APP_ID}/videos/${header.orderNo}_${Date.now()}`);
                 const uploadTask = window.FB.uploadBytesResumable(storageRef, file);
 
                 uploadTask.on('state_changed', 
                     (snapshot) => {
                         const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-                        setUploadProgress(progress > 0 ? progress : 0.1);
+                        setUploadProgress(progress);
                     }, 
                     (error) => {
-                        console.error("影片上傳失敗:", error);
-                        alert(`❌ 上傳被拒絕！\n\n可能原因：\n1. Firebase Storage 尚未啟用\n2. 規則未設定為 allow read, write: if true;\n\n錯誤代碼：${error.code}`);
+                        alert("影片上傳失敗！檔案可能過大。");
                         setUploadProgress(0);
                     }, 
                     async () => {
-                        try {
-                            const downloadURL = await window.FB.getDownloadURL(uploadTask.snapshot.ref);
-                            setHeader(prev => ({...prev, videoLink: downloadURL}));
-                            setUploadProgress(0);
-                            alert("✅ 影片成功上傳至雲端！");
-                        } catch (err) {
-                            alert("取得影片網址失敗：" + err.message);
-                            setUploadProgress(0);
-                        }
+                        const downloadURL = await window.FB.getDownloadURL(uploadTask.snapshot.ref);
+                        setHeader(prev => ({...prev, videoLink: downloadURL}));
+                        setUploadProgress(0);
+                        alert("✅ 影片上傳完成！");
                     }
                 );
             };
@@ -317,8 +312,9 @@
                 setDeleteConfirm(null);
                 setIsLoading(true);
                 try {
-                    await window.FB.deleteDoc(window.FB.doc(db, 'artifacts', FIREBASE_APP_ID, 'public', 'data', 'cases', orderNo));
-                } catch (e) { console.error(e); } 
+                    const docRef = window.FB.doc(db, 'artifacts', FIREBASE_APP_ID, 'public', 'data', 'cases', orderNo);
+                    await window.FB.deleteDoc(docRef);
+                } catch (error) { console.error("刪除失敗", error); } 
                 finally { setIsLoading(false); }
             };
 
@@ -335,22 +331,10 @@
                         let u = { ...m, [field]: val };
                         if (field === 'w') u.dw = val ? parseInt(val) - 48 : 0;
                         if (field === 'h') u.dh = val ? parseInt(val) - 30 : 0;
-                        if (field === 't') u.body = val;
                         return u;
                     }
                     return m;
                 }));
-            };
-
-            const addRow = () => {
-                setMeasurements(prev => [
-                    ...prev, 
-                    { 
-                        id: Date.now() + Math.random(), 
-                        no: (prev.length + 1) + ".", 
-                        w: 0, h: 0, dw: 0, dh: 0, t: 0, body: 0, trim: 50, note: "", style: "房" 
-                    }
-                ]);
             };
 
             const exportExcel = async () => {
@@ -365,10 +349,8 @@
                         { width: 7 }, { width: 7 }
                     ];
 
-                    const borderAll = { 
-                        top: {style:'thin'}, left: {style:'thin'}, 
-                        bottom: {style:'thin'}, right: {style:'thin'} 
-                    };
+                    const thin = { style:'thin' };
+                    const borderAll = { top: thin, left: thin, bottom: thin, right: thin };
 
                     const tabs = ["工單扣法", "尺寸單(榮豐)", "採購單(框)", "採購單(門)", "尺寸單", "合約(未稅)"];
                     tabs.forEach((t, i) => {
@@ -435,6 +417,7 @@
                     });
 
                     const footStart = cur + 1;
+                    
                     sheet.mergeCells(`A${footStart}:D${footStart}`); 
                     sheet.getCell(`A${footStart}`).value = "框門注意事項: " + header.precautions;
                     sheet.mergeCells(`E${footStart}:L${footStart}`); 
@@ -524,14 +507,18 @@
 
             return (
                 <div className="min-h-screen flex flex-col pb-20 relative">
+                    {/* 刪除確認視窗 */}
                     {deleteConfirm && (
                         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[100] flex items-center justify-center p-4">
                             <div className="bg-white rounded-[2.5rem] p-10 max-w-sm w-full shadow-2xl">
+                                <div className="bg-red-50 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6">
+                                    <Icon name="alert-triangle" className="w-10 h-10 text-red-500" />
+                                </div>
                                 <h3 className="text-2xl font-black text-slate-800 text-center mb-2">確認要刪除嗎？</h3>
-                                <p className="text-slate-500 font-bold text-center mb-10">訂單 [{deleteConfirm}] 將永久刪除。</p>
+                                <p className="text-slate-500 font-bold text-center mb-10 leading-relaxed">即將刪除訂單 [{deleteConfirm}]<br/>此動作將永久移除雲端紀錄。</p>
                                 <div className="flex gap-4">
-                                    <button onClick={() => setDeleteConfirm(null)} className="flex-1 bg-slate-100 py-4 rounded-2xl font-black">取消</button>
-                                    <button onClick={() => confirmDeleteHistory(deleteConfirm)} className="flex-1 bg-red-500 text-white py-4 rounded-2xl font-black">確認刪除</button>
+                                    <button onClick={() => setDeleteConfirm(null)} className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-600 py-4 rounded-2xl font-black transition-all">取消</button>
+                                    <button onClick={() => confirmDeleteHistory(deleteConfirm)} className="flex-1 bg-red-500 hover:bg-red-600 text-white py-4 rounded-2xl font-black shadow-lg shadow-red-500/30 transition-all">刪除</button>
                                 </div>
                             </div>
                         </div>
@@ -544,7 +531,7 @@
                                     <img src={logoImgBase64} alt="Logo" className="w-10 h-10 object-contain" />
                                 </div>
                             ) : (
-                                <div className="bg-blue-600 p-2 rounded-lg shadow-lg"><Icon name="shield-check" className="w-6 h-6" /></div>
+                                <div className="bg-blue-600 p-2 rounded-lg shadow-lg"><Icon name="shield-check" className="w-7 h-7" /></div>
                             )}
                             <div>
                                 <h1 className="text-2xl font-black italic tracking-tighter uppercase leading-none">丈量尺寸</h1>
@@ -559,6 +546,7 @@
 
                     {view === "main" ? (
                         <main className="p-4 lg:p-8 max-w-7xl mx-auto w-full space-y-8">
+                            {/* 案場基礎 */}
                             <div className="card p-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-8">
                                 <div className="space-y-2">
                                     <label className="text-xs font-black text-slate-400 uppercase">訂單編號</label>
@@ -570,9 +558,9 @@
                                 </div>
                                 <div className="space-y-2 text-center">
                                     <label className="text-xs font-black text-slate-400 uppercase text-red-500">影片同步</label>
-                                    <button onClick={()=>fileInputRef.current.click()} className="w-full bg-slate-50 py-3 rounded-2xl text-sm font-black border flex items-center justify-center gap-2">
+                                    <button onClick={()=>fileInputRef.current.click()} className="w-full bg-slate-50 py-3 rounded-2xl text-sm font-black border flex items-center justify-center gap-2 transition-all">
                                         {uploadProgress > 0 && uploadProgress < 100 ? <div className="w-5 h-5 border-3 border-blue-500 border-t-transparent rounded-full animate-spin"></div> : 
-                                         header.videoLink ? <Icon name="check" className="w-4 h-4 text-emerald-500"/> : <Icon name="upload" className="w-5 h-5"/>}
+                                         header.videoLink ? <Icon name="check-circle-2" className="w-6 h-6 text-emerald-500"/> : <Icon name="upload" className="w-5 h-5"/>}
                                         {uploadProgress > 0 && uploadProgress < 100 ? `${Math.round(uploadProgress)}%` : header.videoLink ? "影片已同步" : "上傳影片"}
                                     </button>
                                     <input type="file" ref={fileInputRef} hidden accept="video/*" onChange={handleVideoSelect} />
@@ -580,6 +568,7 @@
                                 <button onClick={exportExcel} className="bg-emerald-600 text-white py-3 rounded-xl text-sm font-black shadow-lg mt-auto active:scale-95 transition-all">導出 Excel</button>
                             </div>
 
+                            {/* 影片預覽 */}
                             {videoUrl && (
                                 <div className="bg-black rounded-[2.5rem] overflow-hidden shadow-2xl aspect-video max-w-3xl mx-auto border-8 border-white relative group">
                                     <video src={videoUrl} controls className="w-full h-full object-cover"></video>
@@ -598,6 +587,7 @@
                                 </div>
                             </div>
 
+                            {/* 智慧語音控制區 */}
                             <div className="bg-slate-900 rounded-[3.5rem] p-12 text-center relative overflow-hidden shadow-2xl border-8 border-white">
                                 {isLoading && <div className="absolute inset-0 bg-slate-900/95 z-30 flex flex-col items-center justify-center"><Icon name="loader-2" className="animate-spin text-blue-500 w-20 h-20 mb-4" /><p className="text-blue-400 font-black tracking-widest text-lg animate-pulse uppercase">AI 智慧解析中...</p></div>}
                                 <button onClick={toggleRecording} className={`w-40 h-40 rounded-full flex items-center justify-center mx-auto transition-all border-[14px] border-slate-800 shadow-2xl ${isRecording ? 'record-pulse' : 'bg-white hover:scale-105'}`}>
@@ -607,15 +597,16 @@
                                 <p className="mt-4 text-slate-500 text-xs font-black uppercase">可同時報地址、備註、零件、尺寸</p>
                             </div>
 
+                            {/* 丈量明細 */}
                             <div className="card overflow-hidden">
                                 <div className="p-6 bg-slate-50 border-b flex justify-between items-center bg-slate-50/80">
                                     <h3 className="section-title italic">Zhiyang Order List</h3>
-                                    <button onClick={addRow} className="bg-indigo-600 text-white px-6 py-3 rounded-2xl text-sm font-black active:scale-95 transition-all">+ 手動新增</button>
+                                    <button onClick={() => setMeasurements([...measurements, { id: Date.now(), no: (measurements.length+1)+".", w:0, h:0, dw:0, dh:0, t:0, body:0, trim:50, note:"" }])} className="bg-indigo-600 text-white px-6 py-3 rounded-2xl text-sm font-black shadow-lg active:scale-95 transition-all">+ 手動新增</button>
                                 </div>
                                 <div className="overflow-x-auto virtual-list no-scrollbar">
                                     <table className="w-full text-left min-w-[1100px] border-separate border-spacing-0">
                                         <thead className="bg-slate-50 text-sm text-slate-400 font-black uppercase sticky top-0 z-20 shadow-sm border-b">
-                                            <tr><th className="px-8 py-6">編號</th><th className="px-4 py-6 text-blue-700">洞寬</th><th className="px-4 py-6 text-blue-700">洞高</th><th className="px-4 py-6 text-emerald-600 border-x">門寬</th><th className="px-4 py-6 text-emerald-600 border-r">門高</th><th className="px-4 py-6 text-center">牆厚</th><th className="px-8 py-6">備註 / 樣式</th><th className="px-4 py-6"></th></tr>
+                                            <tr><th className="px-8 py-6">編號</th><th className="px-4 py-6 text-blue-700">洞寬</th><th className="px-4 py-6 text-blue-700">洞高</th><th className="px-4 py-6 text-emerald-600 border-x">門寬</th><th className="px-4 py-6 text-emerald-600 border-r">門高</th><th className="px-4 py-6 text-center">牆厚</th><th className="px-8 py-6">備註 / 樣式</th><th className="px-4 py-6 w-24"></th></tr>
                                         </thead>
                                         <tbody className="divide-y divide-slate-100">
                                             {measurements.map(m => (
@@ -628,9 +619,9 @@
                                                     <td className="px-4 py-6"><input type="number" value={m.t} onChange={e=>handleUpdateRow(m.id, 't', e.target.value)} className="w-full bg-transparent border-none p-0 text-2xl font-bold text-center focus:ring-0" /></td>
                                                     <td className="px-8 py-6 flex flex-col gap-3">
                                                         <div className="flex gap-3"><span className="badge">房間門</span><span className="badge">隱形門止</span></div>
-                                                        <input value={m.note} onChange={e=>handleUpdateRow(m.id, 'note', e.target.value)} className="w-full bg-transparent border-none p-0 text-sm text-slate-500 font-bold italic" placeholder="點此輸入備註..." />
+                                                        <input value={m.note} onChange={e=>handleUpdateRow(m.id, 'note', e.target.value)} className="w-full bg-transparent border-none p-0 text-sm text-slate-500 font-bold italic" placeholder="點此輸入現場狀況..." />
                                                     </td>
-                                                    <td className="px-4 py-6 text-center"><button onClick={() => setMeasurements(measurements.filter(x=>x.id!==m.id))} className="text-slate-300 hover:text-red-500 transition-all opacity-0 group-hover:opacity-100"><Icon name="trash-2" className="w-7 h-7" /></button></td>
+                                                    <td className="px-4 py-6 text-center"><button onClick={() => setMeasurements(measurements.filter(x=>x.id!==m.id))} className="text-slate-300 hover:text-red-500 p-3 bg-slate-50 hover:bg-red-50 rounded-2xl transition-all opacity-0 group-hover:opacity-100"><Icon name="trash-2" className="w-6 h-6" /></button></td>
                                                 </tr>
                                             ))}
                                         </tbody>
@@ -663,11 +654,11 @@
                                 <div className="p-8 bg-slate-900 text-white flex justify-between items-center rounded-t-[2.5rem]"><h3 className="font-black italic uppercase text-2xl tracking-widest">存檔歷史紀錄</h3><span className="bg-blue-600 px-4 py-1 rounded-full text-xs font-black">{allCases.length} 案存檔</span></div>
                                 <div className="divide-y divide-slate-100">
                                     {allCases.map(c => (
-                                        <div key={c.id} className="p-8 hover:bg-slate-50 transition-all flex justify-between items-center cursor-pointer group" onClick={() => loadCase(c)}>
+                                        <div key={c.id} className="p-8 hover:bg-slate-50 transition-all flex justify-between items-center cursor-pointer group" onClick={() => { setHeader({...c}); setMeasurements(c.items || []); setView("main"); }}>
                                             <div className="space-y-1">
                                                 <p className="text-blue-600 font-black text-3xl mb-1 tracking-tighter">{c.orderNo}</p>
                                                 <p className="text-xl font-bold text-slate-500">{c.address}</p>
-                                                <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">同步時間: {new Date(c.updatedAt).toLocaleString()}</p>
+                                                <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mt-2">同步時間: {new Date(c.updatedAt).toLocaleString()}</p>
                                             </div>
                                             <div className="flex items-center gap-10">
                                                 <button onClick={(e) => { e.stopPropagation(); setDeleteConfirm(c.orderNo); }} className="p-4 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-2xl transition-all opacity-0 group-hover:opacity-100"><Icon name="trash-2" className="w-10 h-10" /></button>
@@ -675,6 +666,7 @@
                                             </div>
                                         </div>
                                     ))}
+                                    {allCases.length === 0 && <div className="p-32 text-center text-slate-300 font-black uppercase tracking-[0.5em] italic">No History Found</div>}
                                 </div>
                             </div>
                         </main>
