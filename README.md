@@ -1,1 +1,320 @@
-# od-survey
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>歐德智揚雲端下料助手</title>
+    <!-- 載入 Tailwind CSS & Google Fonts -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700;900&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Noto Sans TC', sans-serif; background-color: #f8fafc; }
+        .record-pulse { animation: pulse 1.5s infinite; }
+        @keyframes pulse {
+            0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.4); }
+            70% { transform: scale(1.05); box-shadow: 0 0 0 15px rgba(37, 99, 235, 0); }
+            100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(37, 99, 235, 0); }
+        }
+    </style>
+</head>
+<body class="pb-24">
+
+    <!-- 頂部導航 -->
+    <nav class="bg-slate-900 text-white p-4 shadow-xl sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto flex justify-between items-center">
+            <h1 class="text-xl font-black italic tracking-tighter flex items-center gap-2">
+                <span class="bg-blue-600 text-white px-2 py-0.5 rounded text-sm">智揚</span>
+                雲端下料系統
+            </h1>
+            <div class="flex gap-2">
+                <button onclick="syncData()" class="bg-white/10 hover:bg-white/20 text-white px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1 border border-white/10">
+                    同步雲端
+                </button>
+                <button onclick="exportExcel()" class="bg-emerald-500 hover:bg-emerald-600 text-white px-3 py-2 rounded-xl text-xs font-bold transition shadow-lg flex items-center gap-1">
+                    導出 Excel
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <div class="max-w-7xl mx-auto p-4 lg:p-8 space-y-6">
+        
+        <!-- 案場標頭資訊 -->
+        <div class="bg-white rounded-[2.5rem] p-8 shadow-sm border border-slate-200 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 relative">
+            <div class="flex flex-col gap-1">
+                <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest">訂單編號 / 聯絡人</label>
+                <div class="flex gap-2">
+                    <input id="orderNo" onblur="loadFromCloud()" class="w-1/2 border-b-2 border-slate-100 p-1 text-sm font-black text-indigo-600 outline-none focus:border-indigo-600" value="20260412">
+                    <input id="contact" class="w-1/2 border-b-2 border-slate-100 p-1 text-sm font-bold outline-none focus:border-indigo-600" value="王廷羽">
+                </div>
+            </div>
+            <div class="flex flex-col gap-1 lg:col-span-2">
+                <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest">案場地址</label>
+                <input id="address" class="w-full border-b-2 border-slate-100 p-1 text-sm font-bold outline-none focus:border-indigo-600" value="桃園市中壢區青商路419號14樓">
+            </div>
+            <div class="flex flex-col gap-1">
+                <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1 text-red-500">案場影片選取</label>
+                <input type="file" id="videoInput" accept="video/*" class="hidden" onchange="handleVideoPreview(event)">
+                <button onclick="document.getElementById('videoInput').click()" class="bg-slate-100 hover:bg-slate-200 py-2 rounded-xl text-[10px] font-black flex items-center justify-center gap-2 transition-all">
+                    選取手機影片
+                </button>
+            </div>
+        </div>
+
+        <!-- 影片播放區 -->
+        <div id="videoArea" class="hidden max-w-2xl mx-auto">
+            <div class="bg-black rounded-3xl overflow-hidden shadow-2xl aspect-video border-8 border-white relative group">
+                <video id="videoPlayer" controls class="w-full h-full object-cover"></video>
+            </div>
+        </div>
+
+        <!-- 錄音控制台 -->
+        <div class="bg-slate-900 rounded-[3rem] p-12 text-center relative overflow-hidden shadow-2xl border-8 border-white">
+            <div id="loader" class="hidden absolute inset-0 bg-slate-900/95 z-30 flex flex-col items-center justify-center">
+                <div class="w-12 h-12 border-4 border-white/20 border-t-blue-500 rounded-full animate-spin mb-4"></div>
+                <p class="text-white text-sm font-black tracking-widest animate-pulse uppercase">AI 解析尺寸並同步中...</p>
+            </div>
+            <div class="text-white/10 font-mono text-7xl mb-8 tracking-tighter" id="timer">00:00</div>
+            <button id="recordBtn" onclick="toggleRecording()" class="w-32 h-32 bg-white rounded-full flex items-center justify-center mx-auto shadow-2xl active:scale-95 transition-all border-[12px] border-slate-800">
+                <span id="recordIcon" class="block w-12 h-12 bg-slate-900 rounded-full"></span>
+                <span id="stopIcon" class="hidden w-12 h-12 bg-red-600 rounded-xl"></span>
+            </button>
+            <p id="statusMsg" class="text-slate-500 mt-10 text-xs font-black uppercase tracking-[0.2em]">智揚下料法 (寬-48 / 高-30)</p>
+        </div>
+
+        <!-- 數據表格 -->
+        <div class="bg-white rounded-[2.5rem] shadow-sm border border-slate-200 overflow-hidden">
+            <div class="p-6 bg-slate-50/80 border-b border-slate-100 flex justify-between items-center">
+                <h3 class="font-black text-slate-800 flex items-center gap-2">尺寸清單表格</h3>
+                <button onclick="addRow()" class="bg-blue-50 text-blue-600 px-4 py-2 rounded-xl text-xs font-black hover:bg-blue-100 transition border border-blue-100">+ 手動新增</button>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left min-w-[1100px] border-separate border-spacing-0">
+                    <thead>
+                        <tr class="bg-slate-50 text-[10px] text-slate-400 font-black uppercase tracking-widest">
+                            <th class="px-6 py-4 w-16 text-center">編號</th>
+                            <th class="px-4 py-4 text-blue-700">洞寬 (W)</th>
+                            <th class="px-4 py-4 text-blue-700">洞高 (H)</th>
+                            <th class="px-4 py-4 text-emerald-600 bg-emerald-50/20 font-black">門寬 (-48)</th>
+                            <th class="px-4 py-4 text-emerald-600 bg-emerald-50/20 font-black">門高 (-30)</th>
+                            <th class="px-4 py-4">牆厚 (T)</th>
+                            <th class="px-4 py-4">主體</th>
+                            <th class="px-4 py-4 w-16 text-center">線板</th>
+                            <th class="px-6 py-4">備註</th>
+                            <th class="px-4 py-4"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="tableBody" class="divide-y divide-slate-100">
+                        <!-- Rows Injected Here -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- 載入 Firebase (CDN 版本，確保穩定) -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Firebase 設置 (如果您不在 Canvas 運行，請手動替換為您的 Config)
+        const firebaseConfig = JSON.parse(__firebase_config);
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'od-official-app';
+        const apiKey = ""; 
+
+        let user = null;
+        let isRecording = false;
+        let mediaRecorder;
+        let audioChunks = [];
+        let timerSeconds = 0;
+        let timerInterval;
+        let items = [];
+
+        // 登入
+        async function login() {
+            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                await signInWithCustomToken(auth, __initial_auth_token);
+            } else {
+                await signInAnonymously(auth);
+            }
+        }
+        login();
+
+        onAuthStateChanged(auth, (u) => {
+            user = u;
+            if (u) loadFromCloud();
+        });
+
+        // 全域掛載函數以便 HTML 按鈕點擊
+        window.toggleRecording = async () => {
+            if (isRecording) {
+                mediaRecorder.stop();
+                mediaRecorder.stream.getTracks().forEach(t => t.stop());
+                isRecording = false;
+                document.getElementById('recordBtn').classList.remove('record-pulse');
+                document.getElementById('recordIcon').classList.remove('hidden');
+                document.getElementById('stopIcon').classList.add('hidden');
+                clearInterval(timerInterval);
+            } else {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    mediaRecorder = new MediaRecorder(stream);
+                    audioChunks = [];
+                    mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+                    mediaRecorder.onstop = processVoice;
+                    mediaRecorder.start();
+                    isRecording = true;
+                    document.getElementById('recordBtn').classList.add('record-pulse');
+                    document.getElementById('recordIcon').classList.add('hidden');
+                    document.getElementById('stopIcon').classList.remove('hidden');
+                    timerSeconds = 0;
+                    timerInterval = setInterval(() => {
+                        timerSeconds++;
+                        document.getElementById('timer').innerText = 
+                            `${Math.floor(timerSeconds/60).toString().padStart(2,'0')}:${(timerSeconds%60).toString().padStart(2,'0')}`;
+                    }, 1000);
+                } catch (e) { alert("請允許麥克風權限"); }
+            }
+        };
+
+        async function processVoice() {
+            document.getElementById('loader').classList.remove('hidden');
+            const blob = new Blob(audioChunks, { type: 'audio/webm' });
+            const reader = new FileReader();
+            reader.readAsDataURL(blob);
+            reader.onloadend = async () => {
+                const base64 = reader.result.split(',')[1];
+                const prompt = "提取數據：門寬=洞寬-48, 門高=洞高-30。回傳 JSON: {\"items\":[{\"no\":\"1.\",\"w\":898,\"h\":2190,\"t\":125,\"note\":\"\"}]}";
+                try {
+                    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            contents: [{ parts: [{ text: "解析錄音：" }, { inlineData: { mimeType: "audio/webm", data: base64 } }] }],
+                            systemInstruction: { parts: [{ text: prompt }] },
+                            generationConfig: { responseMimeType: "application/json" }
+                        })
+                    });
+                    const data = await res.json();
+                    const parsed = JSON.parse(data.candidates[0].content.parts[0].text);
+                    if (parsed.items) {
+                        parsed.items.forEach(i => addRow(i));
+                        syncData();
+                    }
+                } catch (e) { console.error(e); }
+                document.getElementById('loader').classList.add('hidden');
+            };
+        }
+
+        window.addRow = (data = {}) => {
+            const id = Date.now() + Math.random();
+            items.push({
+                id,
+                no: data.no || (items.length + 1) + ".",
+                w: data.w || 0,
+                h: data.h || 0,
+                dw: data.w ? data.w - 48 : 0,
+                dh: data.h ? data.h - 30 : 0,
+                t: data.t || 0,
+                body: data.t || 0,
+                trim: 50,
+                note: data.note || ""
+            });
+            renderTable();
+        };
+
+        window.updateRow = (id, field, val) => {
+            const m = items.find(x => x.id == id);
+            if (!m) return;
+            m[field] = (field === 'note') ? val : parseInt(val) || 0;
+            if (field === 'w') m.dw = m.w ? m.w - 48 : 0;
+            if (field === 'h') m.dh = m.h ? m.h - 30 : 0;
+            if (field === 't') m.body = m.t;
+            renderTable();
+        };
+
+        window.deleteRow = (id) => {
+            items = items.filter(x => x.id != id);
+            renderTable();
+        };
+
+        window.renderTable = () => {
+            const body = document.getElementById('tableBody');
+            body.innerHTML = "";
+            items.forEach(m => {
+                const tr = document.createElement('tr');
+                tr.className = "group hover:bg-blue-50/20";
+                tr.innerHTML = `
+                    <td class="px-6 py-3 font-bold text-slate-300 text-xs text-center">${m.no}</td>
+                    <td class="px-4 py-3"><input type="number" value="${m.w}" onchange="updateRow('${m.id}', 'w', this.value)" class="w-full bg-transparent border-none p-0 text-sm font-black text-blue-800 focus:ring-0"></td>
+                    <td class="px-4 py-3"><input type="number" value="${m.h}" onchange="updateRow('${m.id}', 'h', this.value)" class="w-full bg-transparent border-none p-0 text-sm font-black text-blue-800 focus:ring-0"></td>
+                    <td class="px-4 py-3 bg-emerald-50/10 font-black text-emerald-600 text-sm text-center">${m.dw}</td>
+                    <td class="px-4 py-3 bg-emerald-50/10 font-black text-emerald-600 text-sm text-center">${m.dh}</td>
+                    <td class="px-4 py-3"><input type="number" value="${m.t}" onchange="updateRow('${m.id}', 't', this.value)" class="w-full bg-transparent border-none p-0 text-sm text-slate-600 font-bold focus:ring-0"></td>
+                    <td class="px-4 py-3 text-sm text-slate-400 font-medium">${m.body}</td>
+                    <td class="px-4 py-3 text-sm text-slate-400 font-medium text-center">${m.trim}</td>
+                    <td class="px-6 py-3 italic text-slate-400 text-xs"><input value="${m.note}" onchange="updateRow('${m.id}', 'note', this.value)" class="w-full bg-transparent border-none focus:ring-0 p-0" placeholder="備註..."></td>
+                    <td class="px-4 py-3 text-center"><button onclick="deleteRow('${m.id}')" class="text-slate-200 hover:text-red-500">刪除</button></td>
+                `;
+                body.appendChild(tr);
+            });
+        };
+
+        window.syncData = async () => {
+            const orderNo = document.getElementById('orderNo').value;
+            if (!orderNo || !user) return alert("請輸入編號");
+            try {
+                const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'cases', orderNo);
+                await setDoc(docRef, {
+                    orderNo,
+                    contact: document.getElementById('contact').value,
+                    address: document.getElementById('address').value,
+                    phone: document.getElementById('h_phone')?.value || "",
+                    user: document.getElementById('h_user')?.value || "",
+                    items: items,
+                    updatedAt: new Date().toISOString()
+                });
+                alert("雲端同步成功！");
+            } catch (e) { alert("同步失敗"); }
+        };
+
+        window.loadFromCloud = async () => {
+            const orderNo = document.getElementById('orderNo').value;
+            if (!orderNo || !db) return;
+            const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'cases', orderNo);
+            const snap = await getDoc(docRef);
+            if (snap.exists()) {
+                const d = snap.data();
+                document.getElementById('contact').value = d.contact || "";
+                document.getElementById('address').value = d.address || "";
+                items = d.items || [];
+                renderTable();
+            }
+        };
+
+        window.handleVideoPreview = (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                const url = URL.createObjectURL(file);
+                document.getElementById('videoPlayer').src = url;
+                document.getElementById('videoArea').classList.remove('hidden');
+            }
+        };
+
+        window.exportExcel = () => {
+            const o = document.getElementById('orderNo').value;
+            const csv = "編號,洞寬,洞高,門寬,門高,牆厚,主體,備註\n" + items.map(m => `${m.no},${m.w},${m.h},${m.dw},${m.dh},${m.t},${m.body},${m.note}`).join("\n");
+            const blob = new Blob(["\ufeff" + csv], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.download = `智揚下料單_${o}.csv`;
+            link.click();
+        };
+
+    </script>
+</body>
+</html>
