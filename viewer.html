@@ -1,4 +1,4 @@
-html
+```html
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
@@ -13,19 +13,22 @@ html
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700;900&display=swap');
         body { font-family: 'Noto Sans TC', sans-serif; background-color: #f8fafc; }
+        .data-card { background: white; border-radius: 2rem; border: 1px solid #e2e8f0; }
+        .sticky-col { position: sticky; left: 0; background: white; z-index: 10; border-right: 2px solid #f1f5f9; }
     </style>
 </head>
 <body>
     <div id="root"></div>
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-        window.FB = { initializeApp, getAuth, signInAnonymously, onAuthStateChanged, getFirestore, doc, getDoc };
+        window.FB = { initializeApp, getAuth, signInAnonymously, getFirestore, doc, getDoc };
     </script>
     <script type="text/babel">
         const { useState, useEffect } = React;
         const App = () => {
+            const [isReady, setIsReady] = useState(false);
             const [db, setDb] = useState(null);
             const [searchNo, setSearchNo] = useState("");
             const [caseData, setCaseData] = useState(null);
@@ -39,7 +42,8 @@ html
                         const auth = window.FB.getAuth(app);
                         setDb(window.FB.getFirestore(app));
                         await window.FB.signInAnonymously(auth);
-                    } catch (e) { console.error(e); }
+                        setIsReady(true);
+                    } catch (e) { setIsReady(true); }
                 };
                 init();
             }, []);
@@ -52,80 +56,81 @@ html
                     const docRef = window.FB.doc(db, 'artifacts', aid, 'public', 'data', 'cases', searchNo);
                     const snap = await window.FB.getDoc(docRef);
                     if (snap.exists()) setCaseData(snap.data());
-                    else alert("找不到訂單");
-                } catch (e) { alert("讀取失敗"); }
+                    else alert("找不到此編號，請確認");
+                } catch (e) { alert("讀取超時"); }
                 finally { setIsLoading(false); }
             };
 
-            useEffect(() => { lucide.createIcons(); }, [caseData]);
+            useEffect(() => { if(isReady) lucide.createIcons(); }, [caseData, isReady]);
 
             return (
-                <div className="min-h-screen bg-slate-50">
+                <div className="min-h-screen bg-slate-50 flex flex-col">
                     <nav className="bg-slate-900 text-white p-4 shadow-xl flex justify-between items-center">
-                        <h1 className="text-lg font-black italic">Zhiyang <span className="text-emerald-400">Viewer</span></h1>
-                        <span className="text-[10px] font-black text-slate-500 border px-2 py-1 rounded">唯讀</span>
+                        <div className="flex items-center gap-2">
+                            <div className="bg-emerald-600 p-1.5 rounded-lg shadow-lg"><i data-lucide="eye" className="w-5 h-5"></i></div>
+                            <h1 className="text-lg font-black italic uppercase">Zhiyang <span className="text-emerald-400">Viewer</span></h1>
+                        </div>
+                        <span className="text-[10px] font-black text-slate-500 border border-white/5 px-2 py-1 rounded uppercase">Read Only</span>
                     </nav>
 
-                    <main className="p-4 max-w-5xl mx-auto space-y-6">
-                        <div className="bg-white rounded-[2rem] p-8 shadow-sm border">
-                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-3">輸入訂單編號</label>
+                    <main className="p-4 lg:p-8 max-w-5xl mx-auto w-full space-y-6">
+                        <div className="bg-white rounded-[2rem] p-8 shadow-sm border border-slate-200">
+                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-3">輸入訂單編號調取數據</label>
                             <div className="flex gap-2">
-                                <input placeholder="例如: 20260412" value={searchNo} onChange={e=>setSearchNo(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleSearch()} className="flex-1 px-5 py-3 bg-slate-50 rounded-2xl text-sm font-black text-indigo-600 outline-none" />
-                                <button onClick={handleSearch} disabled={isLoading} className="bg-slate-900 text-white px-8 py-3 rounded-2xl font-black text-sm">
-                                    {isLoading ? <i data-lucide="loader-2" className="animate-spin"></i> : "查詢"}
+                                <input placeholder="例如: 20260412" value={searchNo} onChange={e=>setSearchNo(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleSearch()} className="flex-1 px-5 py-3 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-black text-indigo-600 outline-none focus:bg-white focus:border-blue-500 transition-all" />
+                                <button onClick={handleSearch} disabled={isLoading} className="bg-slate-900 text-white px-8 py-3 rounded-2xl font-black text-sm transition-all disabled:opacity-50">
+                                    {isLoading ? <i data-lucide="loader-2" className="animate-spin w-4 h-4"></i> : "查詢案場"}
                                 </button>
                             </div>
                         </div>
 
                         {caseData && (
                             <div className="space-y-6">
-                                <div className="bg-white p-8 rounded-[2rem] shadow-sm border grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div className="data-card p-8 grid grid-cols-1 md:grid-cols-2 gap-6">
                                     <div className="space-y-4">
                                         <div><label className="text-[10px] font-black text-slate-400 uppercase">案場地址</label><p className="text-sm font-bold text-slate-700">{caseData.address}</p></div>
-                                        <div><label className="text-[10px] font-black text-slate-400 uppercase">聯絡人</label><p className="text-sm font-bold text-slate-700">{caseData.contact}</p></div>
+                                        <div><label className="text-[10px] font-black text-slate-400 uppercase">聯絡人 / 電話</label><p className="text-sm font-bold text-slate-700">{caseData.contact} / {caseData.phone}</p></div>
                                     </div>
-                                    <div className="bg-slate-50 p-6 rounded-3xl text-right">
-                                        <label className="text-[10px] font-black text-slate-400 uppercase">總樘數</label>
-                                        <p className="text-3xl font-black text-blue-600">{caseData.items?.length || 0}</p>
+                                    <div className="bg-slate-50 p-6 rounded-3xl flex justify-between items-center">
+                                        <div><label className="text-[10px] font-black text-slate-400 uppercase">更新時間</label><p className="text-xs font-bold text-slate-500">{new Date(caseData.updatedAt).toLocaleString()}</p></div>
+                                        <div className="text-right"><label className="text-[10px] font-black text-slate-400 uppercase">總樘數</label><p className="text-2xl font-black text-blue-600">{caseData.items?.length || 0}</p></div>
                                     </div>
                                 </div>
 
-                                <div className="bg-white rounded-[2rem] border overflow-hidden shadow-sm">
-                                    <table className="w-full text-left min-w-[900px]">
-                                        <thead>
-                                            <tr className="bg-slate-50 text-[10px] text-slate-400 font-black uppercase border-b">
-                                                <th className="px-6 py-4">編號</th>
-                                                <th className="px-4 py-4 text-emerald-600 bg-emerald-50/20">門寬 (-48)</th>
-                                                <th className="px-4 py-4 text-emerald-600 bg-emerald-50/20">門高 (-30)</th>
-                                                <th className="px-4 py-4">牆厚 (T)</th>
-                                                <th className="px-6 py-4">樣式 / 門止 / 備註</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-slate-100">
-                                            {caseData.items?.map((m, i) => (
-                                                <tr key={i} className="hover:bg-slate-50">
-                                                    <td className="px-6 py-4 font-black text-slate-400 text-xs">{m.no}</td>
-                                                    <td className="px-4 py-4 font-black text-emerald-600 text-lg">{m.dw}</td>
-                                                    <td className="px-4 py-4 font-black text-emerald-600 text-lg">{m.dh}</td>
-                                                    <td className="px-4 py-4 font-bold text-slate-700">{m.t}</td>
-                                                    <td className="px-6 py-4">
-                                                        <div className="flex gap-2"><span className="bg-blue-50 text-blue-700 px-2 py-0.5 rounded text-[10px] font-black uppercase">{m.style}</span><span className="bg-slate-100 text-slate-500 px-2 py-0.5 rounded text-[10px] font-black uppercase">{m.stop}</span></div>
-                                                        <p className="text-xs text-slate-400 italic mt-1">{m.note || "無備註"}</p>
-                                                    </td>
+                                <div className="bg-white rounded-[2rem] border border-slate-200 overflow-hidden shadow-sm">
+                                    <div className="overflow-x-auto no-scrollbar">
+                                        <table className="w-full text-left min-w-[900px] border-separate border-spacing-0">
+                                            <thead>
+                                                <tr className="bg-slate-50 text-[10px] text-slate-400 font-black uppercase tracking-widest border-b border-slate-100">
+                                                    <th className="px-6 py-4 sticky-col">編號</th>
+                                                    <th className="px-4 py-4 text-emerald-600 font-black bg-emerald-50/20">門寬 (-48)</th>
+                                                    <th className="px-4 py-4 text-emerald-600 font-black bg-emerald-50/20">門高 (-30)</th>
+                                                    <th className="px-4 py-4 font-black">牆厚 (T)</th>
+                                                    <th className="px-4 py-4 text-slate-400 font-black">主體</th>
+                                                    <th className="px-6 py-4 font-black uppercase">樣式 / 門止 / 備註</th>
                                                 </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-100">
+                                                {caseData.items?.map((m, i) => (
+                                                    <tr key={i} className="hover:bg-slate-50 transition-all">
+                                                        <td className="px-6 py-4 font-black text-slate-400 text-xs sticky-col">{m.no}</td>
+                                                        <td className="px-4 py-4 font-black text-emerald-600 text-lg">{m.dw}</td>
+                                                        <td className="px-4 py-4 font-black text-emerald-600 text-lg">{m.dh}</td>
+                                                        <td className="px-4 py-4 font-bold text-slate-700">{m.t}</td>
+                                                        <td className="px-4 py-4 text-slate-400 text-sm font-medium text-center">{m.body}</td>
+                                                        <td className="px-6 py-4"><div className="flex gap-2 mb-1"><span className="bg-blue-50 text-blue-700 px-2 py-0.5 rounded text-[10px] font-black uppercase">{m.style}</span><span className="bg-slate-100 text-slate-500 px-2 py-0.5 rounded text-[10px] font-black uppercase">{m.stop}</span></div><p className="text-xs text-slate-400 font-bold italic">{m.note || "無備註"}</p></td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
                                 </div>
                             </div>
                         )}
                     </main>
+                    <footer className="mt-auto py-10 text-center opacity-30 text-[10px] font-black uppercase tracking-[0.5em]">Zhiyang Viewer v15.5</footer>
                 </div>
             );
         };
         const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
-    </script>
-</body>
-</html>
-
+        root.r
