@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>智揚下料單 - 師傅查看器</title>
+    <title>智揚下料單 - 師傅純讀取版</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -13,188 +13,275 @@
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700;900&family=Noto+Serif+TC:wght@900&display=swap');
         body { font-family: 'Noto Sans TC', sans-serif; background-color: #f8fafc; }
         .no-scrollbar::-webkit-scrollbar { display: none; }
-        input:focus { border-color: #2563eb !important; outline: none; }
+        .section-title { border-left: 6px solid #2563eb; padding-left: 14px; font-weight: 900; color: #1e293b; letter-spacing: 1px; font-size: 1.5rem; }
+        .card { background: white; border-radius: 2.5rem; box-shadow: 0 10px 25px -5px rgb(0 0 0 / 0.1); border: 1px solid #e2e8f0; overflow: hidden; }
+        .badge { background: #e0f2fe; color: #0369a1; font-size: 14px; padding: 4px 8px; border-radius: 6px; font-weight: 900; }
     </style>
 </head>
-<body class="pb-10">
-
+<body>
     <div id="root"></div>
-
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         window.FB = { initializeApp, getAuth, signInAnonymously, getFirestore, doc, getDoc };
     </script>
-
     <script type="text/babel">
-        const { useState, useEffect } = React;
+        const { useState, useEffect, useRef } = React;
+        
+        const Icon = ({ name, className }) => {
+            const ref = useRef(null);
+            useEffect(() => {
+                if (ref.current && window.lucide) {
+                    const temp = document.createElement('div');
+                    temp.innerHTML = `<i data-lucide="${name}"></i>`;
+                    window.lucide.createIcons({ root: temp });
+                    const svg = temp.querySelector('svg');
+                    if (svg) {
+                        if (className) className.split(' ').forEach(c => { if (c.trim()) svg.classList.add(c.trim()); });
+                        ref.current.innerHTML = '';
+                        ref.current.appendChild(svg);
+                    }
+                }
+            }, [name, className]);
+            return <span ref={ref} className="inline-flex items-center justify-center" />;
+        };
+
         const App = () => {
             const [isReady, setIsReady] = useState(false);
             const [db, setDb] = useState(null);
             const [searchNo, setSearchNo] = useState("");
             const [caseData, setCaseData] = useState(null);
             const [isLoading, setIsLoading] = useState(false);
+            const [logoImgBase64, setLogoImgBase64] = useState("");
+
+            // 寫死金鑰，確保 GitHub Pages 穩定連線
+            const firebaseConfig = {
+                apiKey: "AIzaSyBEcCQcuwCh30xDmj3wE-3CM2YffgIxfAk",
+                authDomain: "tao-men.firebaseapp.com",
+                projectId: "tao-men",
+                storageBucket: "tao-men.firebasestorage.app",
+                messagingSenderId: "332609297071",
+                appId: "1:332609297071:web:03593a930475c97b87525a"
+            };
+
+            const getLogoBase64 = async () => {
+                return new Promise((resolve) => {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = 200; canvas.height = 200;
+                    const ctx = canvas.getContext('2d');
+                    ctx.fillStyle = 'white'; ctx.fillRect(0, 0, 200, 200);
+                    ctx.beginPath(); ctx.arc(100, 85, 70, 0, 2 * Math.PI);
+                    ctx.lineWidth = 14; ctx.strokeStyle = 'black'; ctx.stroke();
+                    ctx.font = '900 90px "Noto Serif TC", serif'; ctx.fillStyle = 'black';
+                    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('匠', 100, 95);
+                    ctx.font = '900 24px "Noto Sans TC", sans-serif'; ctx.fillText('門扉美學館', 100, 185);
+                    resolve(canvas.toDataURL('image/png'));
+                });
+            };
 
             useEffect(() => {
+                getLogoBase64().then(url => setLogoImgBase64(url));
+
                 const init = async () => {
-                    // Firebase 配置需與 index.html 相同
-                    const firebaseConfig = { 
-                        apiKey: "AIzaSyBEcCQcuwCh30xDmj3wE-3CM2YffgIxfAk", 
-                        authDomain: "tao-men.firebaseapp.com", 
-                        projectId: "tao-men", 
-                        storageBucket: "tao-men.firebasestorage.app", 
-                        messagingSenderId: "332609297071", 
-                        appId: "1:332609297071:web:03593a930475c97b87525a" 
-                    };
                     try {
                         const app = window.FB.initializeApp(firebaseConfig);
                         const firestore = window.FB.getFirestore(app);
                         setDb(firestore);
-                        await window.FB.signInAnonymously(window.FB.getAuth(app));
+                        
                         setIsReady(true);
+                        const auth = window.FB.getAuth(app);
+                        window.FB.signInAnonymously(auth).catch(e => console.warn("Auth skipped"));
                     } catch (e) { setIsReady(true); }
                 };
                 init();
             }, []);
 
             const handleSearch = async () => {
-                if (!searchNo) return;
+                if (!db || !searchNo) return;
                 setIsLoading(true);
                 try {
-                    const appId = 'od-survey-system'; // 需與管理員端 appId 一致
-                    const docRef = window.FB.doc(db, 'artifacts', appId, 'public', 'data', 'cases', searchNo);
+                    const docRef = window.FB.doc(db, 'artifacts', 'od-survey-system', 'public', 'data', 'cases', searchNo);
                     const snap = await window.FB.getDoc(docRef);
-                    if (snap.exists()) {
-                        setCaseData(snap.data());
-                    } else {
-                        alert("找不到此案場，請確認編號是否正確。");
-                    }
+                    if (snap.exists()) setCaseData(snap.data());
+                    else alert("找不到案場，請確認管理員是否已同步。");
                 } catch (e) { alert("讀取失敗"); }
                 finally { setIsLoading(false); }
             };
 
-            useEffect(() => { if(isReady) lucide.createIcons(); }, [caseData, isReady]);
+            // 返回搜尋功能
+            const handleBack = () => {
+                setCaseData(null);
+                setSearchNo("");
+            };
 
-            if (!isReady) return (
-                <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white italic font-black text-2xl uppercase">
-                    系統連線中...
-                </div>
-            );
+            if (!isReady) return <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white italic font-black text-2xl uppercase animate-pulse">連線中...</div>;
 
             return (
                 <div className="min-h-screen bg-slate-50 flex flex-col pb-10">
                     <nav className="bg-slate-900 text-white p-5 shadow-xl sticky top-0 z-50">
-                        <div className="max-w-5xl mx-auto flex justify-between items-center">
-                            <h1 className="text-2xl font-black italic tracking-tighter uppercase">
-                                智揚 <span className="text-blue-400 text-lg not-italic">師傅端</span>
-                            </h1>
-                            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest border border-slate-800 px-2 py-1 rounded">Read Only</span>
+                        <div className="max-w-7xl mx-auto flex justify-between items-center w-full">
+                            <div className="flex items-center gap-3">
+                                {logoImgBase64 ? (
+                                    <div className="bg-white p-1 rounded-xl shadow-lg">
+                                        <img src={logoImgBase64} alt="Logo" className="w-10 h-10 object-contain" />
+                                    </div>
+                                ) : (
+                                    <div className="bg-blue-600 p-2 rounded-lg shadow-lg"><Icon name="shield-check" className="w-6 h-6" /></div>
+                                )}
+                                <div>
+                                    <h1 className="text-2xl font-black italic tracking-tighter uppercase leading-none">智揚助理</h1>
+                                    <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">師傅查看端 (Read-Only)</span>
+                                </div>
+                            </div>
+                            
+                            {caseData && (
+                                <button onClick={handleBack} className="bg-slate-800 text-white px-4 py-2.5 rounded-xl text-sm font-black flex items-center gap-2 transition-all active:scale-95 border border-slate-700">
+                                    <Icon name="chevron-left" className="w-4 h-4" /> 返回搜尋
+                                </button>
+                            )}
                         </div>
                     </nav>
 
-                    <main className="p-4 lg:p-8 max-w-5xl mx-auto w-full space-y-6">
-                        {/* 查詢區域 */}
-                        <div className="bg-white rounded-[2rem] p-8 shadow-sm border text-center space-y-4">
-                            <label className="text-sm font-black text-slate-400 uppercase font-bold tracking-widest block">請輸入訂單編號查詢尺寸</label>
-                            <div className="flex gap-2 max-w-md mx-auto">
-                                <input 
-                                    placeholder="例如: 20260502" 
-                                    value={searchNo} 
-                                    onChange={e=>setSearchNo(e.target.value)} 
-                                    onKeyDown={e=>e.key==='Enter'&&handleSearch()} 
-                                    className="flex-1 px-5 py-4 bg-slate-50 border rounded-2xl text-xl font-black text-indigo-600 outline-none" 
-                                />
-                                <button 
-                                    onClick={handleSearch} 
-                                    disabled={isLoading} 
-                                    className="bg-slate-900 text-white px-8 py-4 rounded-2xl font-black text-lg transition-all active:scale-95 flex items-center gap-2"
-                                >
-                                    {isLoading ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : <i data-lucide="search" className="w-5 h-5"></i>}
-                                    查詢
-                                </button>
-                            </div>
-                        </div>
+                    <main className="p-4 lg:p-8 max-w-7xl mx-auto w-full space-y-8 mt-4">
                         
-                        {caseData && (
-                            <div className="space-y-6 animate-in fade-in duration-500">
-                                {/* 案場簡介 */}
-                                <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border grid grid-cols-1 md:grid-cols-2 gap-6">
-                                    <div className="space-y-4">
-                                        <div>
-                                            <label className="text-sm font-black text-slate-400 uppercase tracking-widest">案場地址</label>
-                                            <p className="font-bold text-slate-700 text-2xl leading-tight mt-1">{caseData.address}</p>
-                                        </div>
-                                        <div className="flex gap-6">
-                                            <div>
-                                                <label className="text-xs font-black text-slate-400 uppercase">聯絡人</label>
-                                                <p className="font-bold text-slate-600">{caseData.contact}</p>
-                                            </div>
-                                            <div>
-                                                <label className="text-xs font-black text-slate-400 uppercase">丈量日期</label>
-                                                <p className="font-bold text-slate-600">{caseData.date}</p>
-                                            </div>
-                                        </div>
+                        {!caseData ? (
+                            <div className="bg-white rounded-[2rem] p-8 shadow-sm border text-center space-y-4 animate-in fade-in zoom-in duration-300 max-w-xl mx-auto mt-20">
+                                <label className="text-sm font-black text-slate-400 uppercase font-bold tracking-widest block">請輸入訂單編號查詢案場</label>
+                                <div className="flex gap-2 mx-auto">
+                                    <input placeholder="例如: 20260502" value={searchNo} onChange={e=>setSearchNo(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleSearch()} className="flex-1 px-5 py-4 bg-slate-50 border rounded-2xl text-xl font-black text-indigo-600 outline-none focus:border-indigo-500" />
+                                    <button onClick={handleSearch} disabled={isLoading} className="bg-slate-900 text-white px-8 py-4 rounded-2xl font-black text-lg transition-all active:scale-95 flex items-center gap-2">
+                                        {isLoading ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : <Icon name="search" className="w-5 h-5" />}
+                                        查詢
+                                    </button>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="space-y-8 animate-in slide-in-from-right-8 fade-in duration-500">
+                                
+                                {/* 案場基礎資訊 */}
+                                <div className="card p-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
+                                    <div className="space-y-2">
+                                        <label className="text-xs font-black text-slate-400 uppercase tracking-widest">訂單編號</label>
+                                        <div className="w-full border-b-2 border-slate-100 p-2 text-2xl font-black text-blue-600 truncate">{caseData.orderNo}</div>
                                     </div>
-                                    <div className="bg-slate-50 p-6 rounded-3xl flex justify-between items-center border border-slate-100">
-                                        <div className="text-right">
-                                            <label className="text-sm font-black text-slate-400 uppercase">總樘數</label>
-                                            <p className="text-6xl font-black text-blue-600 tracking-tighter">{caseData.items?.length || 0} <span className="text-lg">樘</span></p>
-                                        </div>
+                                    <div className="lg:col-span-2 space-y-2">
+                                        <label className="text-xs font-black text-slate-400 uppercase tracking-widest">案場地址</label>
+                                        <div className="w-full border-b-2 border-slate-100 p-2 text-2xl font-bold text-slate-700 truncate">{caseData.address}</div>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-xs font-black text-slate-400 uppercase tracking-widest">聯絡人</label>
+                                        <div className="w-full border-b-2 border-slate-100 p-2 text-xl font-bold text-slate-700 truncate">{caseData.contact} {caseData.phone}</div>
+                                    </div>
+                                    <div className="space-y-2 bg-blue-50 rounded-2xl p-4 flex flex-col justify-center items-center border border-blue-100">
+                                        <label className="text-xs font-black text-blue-400 uppercase tracking-widest">總樘數</label>
+                                        <div className="text-4xl font-black text-blue-600">{caseData.items?.length || 0}</div>
                                     </div>
                                 </div>
 
-                                {/* 影片區區塊 (如果管理員有提供連結) */}
+                                {/* 影片預覽 */}
                                 {caseData.videoLink && (
-                                    <div className="bg-black rounded-[2.5rem] overflow-hidden shadow-2xl aspect-video max-w-4xl mx-auto border-8 border-white relative">
+                                    <div className="bg-black rounded-[2.5rem] overflow-hidden shadow-2xl aspect-video max-w-3xl mx-auto border-8 border-white relative">
                                         <video src={caseData.videoLink} controls className="w-full h-full object-cover"></video>
                                     </div>
                                 )}
 
-                                {/* 尺寸列表 */}
-                                <div className="bg-white rounded-[2rem] border border-slate-200 overflow-hidden shadow-lg overflow-x-auto no-scrollbar">
-                                    <table className="w-full text-left min-w-[1000px] border-separate border-spacing-0">
-                                        <thead className="bg-slate-900 text-sm text-white font-black uppercase tracking-widest">
-                                            <tr>
-                                                <th className="px-6 py-6">編號</th>
-                                                <th className="px-4 py-6 text-blue-400">門寬 (成品)</th>
-                                                <th className="px-4 py-6 text-blue-400">門高 (成品)</th>
-                                                <th className="px-4 py-6">牆厚</th>
-                                                <th className="px-6 py-6">現場備註</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-slate-100">
-                                            {caseData.items?.map((m, i) => (
-                                                <tr key={i} className="hover:bg-blue-50/40 transition-all">
-                                                    <td className="px-6 py-8 font-bold text-slate-400 text-xl">{m.no}</td>
-                                                    <td className="px-4 py-8 font-black text-blue-600 text-5xl tracking-tighter">
-                                                        {m.dw}
-                                                    </td>
-                                                    <td className="px-4 py-8 font-black text-blue-600 text-5xl tracking-tighter">
-                                                        {m.dh}
-                                                    </td>
-                                                    <td className="px-4 py-8 font-bold text-slate-700 text-3xl">
-                                                        {m.t}
-                                                    </td>
-                                                    <td className="px-6 py-8">
-                                                        <div className="flex gap-2 mb-2">
-                                                            <span className="bg-blue-50 text-blue-700 px-2 py-1 rounded text-xs font-black">{m.style}</span>
-                                                            <span className="bg-slate-100 text-slate-500 px-2 py-1 rounded text-xs font-black">隱止</span>
-                                                        </div>
-                                                        <p className="text-lg text-red-600 font-black italic">{m.note || "無備註"}</p>
-                                                    </td>
+                                {/* 樣式設定 */}
+                                <div className="bg-orange-50 rounded-[2rem] p-8 border border-orange-100 grid grid-cols-2 gap-8 shadow-inner">
+                                    <div className="space-y-2">
+                                        <label className="text-xs font-black text-orange-400 uppercase tracking-widest">門框樣式</label>
+                                        <div className="w-full border-b-2 border-orange-200 p-2 text-2xl font-bold text-orange-900">{caseData.frameStyle || '無'}</div>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-xs font-black text-orange-400 uppercase tracking-widest">門片樣式</label>
+                                        <div className="w-full border-b-2 border-orange-200 p-2 text-2xl font-bold text-orange-900">{caseData.doorStyle || '無'}</div>
+                                    </div>
+                                </div>
+
+                                {/* 尺寸明細表 */}
+                                <div className="card overflow-hidden">
+                                    <div className="p-6 bg-slate-50 border-b border-slate-100">
+                                        <h3 className="section-title italic">尺寸數據明細表</h3>
+                                    </div>
+                                    <div className="overflow-x-auto no-scrollbar">
+                                        <table className="w-full text-left min-w-[1000px] border-separate border-spacing-0">
+                                            <thead className="bg-slate-50 text-sm text-slate-400 font-black uppercase sticky top-0 z-20 shadow-sm border-b">
+                                                <tr>
+                                                    <th className="px-8 py-6">編號</th>
+                                                    <th className="px-4 py-6 text-blue-700">洞寬</th>
+                                                    <th className="px-4 py-6 text-blue-700">洞高</th>
+                                                    <th className="px-4 py-6 text-emerald-600 border-x border-slate-100">門寬</th>
+                                                    <th className="px-4 py-6 text-emerald-600 border-r border-slate-100">門高</th>
+                                                    <th className="px-4 py-6 text-center">牆厚</th>
+                                                    <th className="px-8 py-6">備註 / 樣式</th>
                                                 </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-100">
+                                                {caseData.items?.map(m => (
+                                                    <tr key={m.id} className="hover:bg-slate-50 transition-all">
+                                                        <td className="px-8 py-6 font-bold text-slate-400 text-xl italic">{m.no}</td>
+                                                        <td className="px-4 py-6 text-2xl font-black text-blue-800">{m.w}</td>
+                                                        <td className="px-4 py-6 text-2xl font-black text-blue-800">{m.h}</td>
+                                                        <td className="px-4 py-6 bg-emerald-50/20 font-black text-emerald-600 text-4xl tracking-tighter text-center border-x border-slate-100">{m.dw}</td>
+                                                        <td className="px-4 py-6 bg-emerald-50/20 font-black text-emerald-600 text-4xl tracking-tighter text-center border-r border-slate-100">{m.dh}</td>
+                                                        <td className="px-4 py-6 text-2xl font-bold text-slate-700 text-center">{m.t}</td>
+                                                        <td className="px-8 py-6 flex flex-col gap-2">
+                                                            <div className="flex gap-2">
+                                                                <span className="badge">{m.style || '房'}</span>
+                                                                <span className="badge">{m.stop || '隱止'}</span>
+                                                            </div>
+                                                            <div className="text-sm text-slate-500 font-bold italic">{m.note || '無備註'}</div>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                                {(!caseData.items || caseData.items.length === 0) && (
+                                                    <tr>
+                                                        <td colSpan="7" className="py-16 text-center text-slate-400 font-bold tracking-widest">尚未錄入任何尺寸數據</td>
+                                                    </tr>
+                                                )}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+
+                                {/* 五金配件與備註 */}
+                                <div className="card p-10 space-y-10">
+                                    <h3 className="section-title uppercase tracking-[0.2em]">五金配件與精密備註</h3>
+                                    
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+                                        <div className="space-y-6">
+                                            <div className="space-y-2">
+                                                <label className="text-xs font-black text-blue-500 uppercase tracking-widest">框門注意事項</label>
+                                                <div className="w-full bg-slate-50 border rounded-2xl p-5 text-lg font-bold min-h-[5rem] whitespace-pre-wrap">{caseData.precautions || '無'}</div>
+                                            </div>
+                                            <div className="space-y-2">
+                                                <label className="text-xs font-black text-blue-500 uppercase tracking-widest">訂單備註</label>
+                                                <div className="w-full bg-slate-50 border rounded-2xl p-5 text-lg font-bold min-h-[5rem] whitespace-pre-wrap">{caseData.orderRemark || '無'}</div>
+                                            </div>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <label className="text-xs font-black text-red-500 italic uppercase tracking-widest font-black">大紅字警示區</label>
+                                            <div className="w-full bg-red-50/30 border border-red-100 rounded-[2.5rem] p-6 text-red-600 font-black text-3xl text-center leading-relaxed shadow-inner min-h-[12rem] flex items-center justify-center whitespace-pre-wrap">{caseData.redNotice || '無特別警示'}</div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-8">
+                                        {['partCollision','partHinge','partStop','partHandle'].map((key, i) => (
+                                            <div key={key} className="bg-slate-50 p-6 rounded-3xl border border-slate-200 shadow-sm">
+                                                <label className="text-xs font-black text-slate-400 mb-3 block uppercase tracking-widest">{['防撞條','鉸鏈','門止','把手'][i]}</label>
+                                                <div className="w-full bg-white border rounded-2xl p-4 text-2xl font-black text-center leading-loose text-slate-700 shadow-inner min-h-[8rem] flex items-center justify-center whitespace-pre-wrap">{caseData[key] || ''}</div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    
+                                    <div className="flex justify-end gap-6 items-center pt-10 border-t border-slate-100">
+                                        <label className="text-xl font-black text-slate-600 uppercase tracking-widest">訂金金額 (Deposit):</label>
+                                        <div className="min-w-[12rem] bg-slate-100 p-4 rounded-2xl text-right font-black text-blue-600 text-3xl shadow-inner">{caseData.deposit || '0'}</div>
+                                    </div>
                                 </div>
                             </div>
                         )}
                     </main>
-
-                    <footer className="mt-auto py-10 text-center opacity-20 text-[10px] font-black uppercase tracking-[0.5em]">
-                        Zhiyang Worker Viewer v12.0
-                    </footer>
                 </div>
             );
         };
