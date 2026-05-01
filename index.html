@@ -52,9 +52,8 @@
             return <span ref={ref} className="inline-flex items-center justify-center" />;
         };
 
-        // 🚀 版本號：v1.1.4 (精準修復 CORS 阻擋與 v1beta 格式問題)
-        const version = "v1.1.4";
-        // 🚀 您的 API 金鑰
+        // 🚀 版本號：v1.1.5 (萬能相容版：自動切換模型、移除會報錯的複雜參數)
+        const version = "v1.1.5";
         const apiKey = "AIzaSyCBBjJwbHHvuTDvgJbyUZzHOYyE5Owa5bg"; 
 
         const App = () => {
@@ -149,38 +148,64 @@
                     return;
                 }
                 setIsLoading(true);
-                const systemPrompt = `你是一位專業丈量秘書。請分析語音內容，將其分類填入 JSON。
-糾正錯字：門止(門子)、貝-WING(備贏)、子母(紫母)、防撞條(防狀)。
-欄位：header(address, partHandle, partCollision, partStop, partHinge, redNotice, precautions, orderRemark), items(no, w, h, t, note)。`;
+                
+                // 🌟 終極防護：將所有 Schema 與 Instruction 合併成純文字 Prompt，確保 100% 舊版相容
+                const systemPrompt = `你是一位專業丈量秘書。請分析以下語音內容，並將其分類填入 JSON 格式。
+請「只」回傳純 JSON 格式的字串，不要加上任何 Markdown 標記。
+
+【糾正錯字規則】：門止(門子)、貝-WING(備贏)、子母(紫母)、防撞條(防狀)。
+
+【必須嚴格遵守的回傳 JSON 結構】：
+{
+  "header": {
+    "address": "字串",
+    "partHandle": "字串",
+    "partCollision": "字串",
+    "partStop": "字串",
+    "partHinge": "字串",
+    "redNotice": "字串",
+    "precautions": "字串",
+    "orderRemark": "字串"
+  },
+  "items": [
+    {
+      "no": "字串",
+      "w": 數字 (無則填0),
+      "h": 數字 (無則填0),
+      "t": 數字 (無則填0),
+      "note": "字串"
+    }
+  ]
+}
+
+語音內容如下：
+${text}`;
+
+                // 🌟 自動模型降級切換器：依序測試可用模型，避免 404 Not Found
+                let currentModelIndex = 0;
+                const models = ["gemini-1.5-flash", "gemini-1.5-flash-latest", "gemini-pro"];
 
                 const fetchWithRetry = async (retries = 0) => {
                     try {
-                        // 🛠️ 回歸 v1beta (支援 JSON Schema) 並移除會被手機阻擋的自訂標頭，純淨傳送金鑰
-                        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey.trim()}`;
+                        const modelName = models[currentModelIndex];
+                        const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey.trim()}`;
+                        
                         const resp = await fetch(url, {
                             method: 'POST',
-                            headers: { 
-                                'Content-Type': 'application/json'
-                                // 🛑 已移除 x-goog-api-key，避免手機瀏覽器發生 CORS Preflight 錯誤
-                            },
+                            headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
-                                contents: [{ parts: [{ text: `語音內容：${text}` }] }],
-                                systemInstruction: { parts: [{ text: systemPrompt }] },
-                                generationConfig: { 
-                                    responseMimeType: "application/json",
-                                    responseSchema: {
-                                        type: "OBJECT",
-                                        properties: {
-                                            header: { type: "OBJECT", properties: { address: { type: "STRING" }, partHandle: { type: "STRING" }, partCollision: { type: "STRING" }, partStop: { type: "STRING" }, partHinge: { type: "STRING" }, redNotice: { type: "STRING" }, precautions: { type: "STRING" }, orderRemark: { type: "STRING" } } },
-                                            items: { type: "ARRAY", items: { type: "OBJECT", properties: { no: { type: "STRING" }, w: { type: "NUMBER" }, h: { type: "NUMBER" }, t: { type: "NUMBER" }, note: { type: "STRING" } } } }
-                                        }
-                                    }
-                                }
+                                contents: [{ parts: [{ text: systemPrompt }] }]
+                                // 🛑 徹底移除 systemInstruction 與 generationConfig 這些容易引發 400 錯誤的參數
                             })
                         });
 
                         if (!resp.ok) {
-                            const errData = await resp.json();
+                            // 若此模型不存在 (404)，自動切換到下一個保底模型
+                            if (resp.status === 404 && currentModelIndex < models.length - 1) {
+                                currentModelIndex++;
+                                return fetchWithRetry(retries); 
+                            }
+                            const errData = await resp.json().catch(()=>({}));
                             const msg = errData.error?.message || "未知 API 錯誤";
                             throw new Error(`連線被拒絕 (${resp.status}):\n${msg}`);
                         }
@@ -195,10 +220,18 @@
 
                 try {
                     const data = await fetchWithRetry();
-                    const rawText = data.candidates[0].content?.parts?.[0]?.text;
+                    let rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+                    
+                    // 🌟 強制過濾任何非 JSON 的文字 (Markdown 標籤等)
+                    const startIdx = rawText.indexOf('{');
+                    const endIdx = rawText.lastIndexOf('}');
+                    if (startIdx !== -1 && endIdx !== -1) {
+                        rawText = rawText.substring(startIdx, endIdx + 1);
+                    }
+
                     if (!rawText) throw new Error("AI 回傳了無效的格式");
                     
-                    const result = JSON.parse(rawText.trim());
+                    const result = JSON.parse(rawText);
                     
                     let updatedHeader = { ...header };
                     if (result.header) {
@@ -210,8 +243,8 @@
                         const newItems = result.items.map((i, idx) => ({
                             id: Date.now() + Math.random(),
                             no: i.no || (measurements.length + idx + 1) + ".",
-                            w: i.w || 0, h: i.h || 0, dw: i.w ? i.w - 48 : 0, dh: i.h ? i.h - 30 : 0,
-                            t: i.t || 0, note: i.note || ""
+                            w: Number(i.w) || 0, h: Number(i.h) || 0, dw: i.w ? Number(i.w) - 48 : 0, dh: i.h ? Number(i.h) - 30 : 0,
+                            t: Number(i.t) || 0, note: i.note || ""
                         }));
                         updatedItems = [...measurements, ...newItems];
                         setMeasurements(updatedItems);
