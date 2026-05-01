@@ -228,6 +228,8 @@
                                 dw: item.w ? parseInt(item.w) - 48 : 0, 
                                 dh: item.h ? parseInt(item.h) - 30 : 0, 
                                 t: parseInt(item.t) || 0,
+                                body: parseInt(item.t) || 0,
+                                trim: 50,
                                 note: item.note || "",
                                 style: "房", stop: "隱", base: ""
                             }));
@@ -261,17 +263,40 @@
 
             const handleVideoSelect = (e) => {
                 const file = e.target.files[0];
-                if (!file || !storage) return;
+                if (!file) return;
                 setVideoUrl(URL.createObjectURL(file));
-                const storageRef = window.FB.ref(storage, `artifacts/${FIREBASE_APP_ID}/videos/${header.orderNo}_${Date.now()}`);
+
+                if (!storage) {
+                    alert("⚠️ 雲端儲存空間未連線，無法上傳影片。");
+                    return;
+                }
+
+                setUploadProgress(0.1); // 給出即時反饋
+
+                // 更安全的儲存路徑，避免權限問題
+                const storageRef = window.FB.ref(storage, `artifacts/${FIREBASE_APP_ID}/public/data/videos/${header.orderNo}_${Date.now()}`);
                 const uploadTask = window.FB.uploadBytesResumable(storageRef, file);
-                uploadTask.on('state_changed', (snap) => setUploadProgress((snap.bytesTransferred / snap.totalBytes) * 100), 
-                    () => { alert("影片上傳失敗"); setUploadProgress(0); }, 
-                    async () => {
-                        const url = await window.FB.getDownloadURL(uploadTask.snapshot.ref);
-                        setHeader(prev => ({...prev, videoLink: url}));
+
+                uploadTask.on('state_changed', 
+                    (snapshot) => {
+                        const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+                        setUploadProgress(progress > 0 ? progress : 0.1);
+                    }, 
+                    (error) => {
+                        console.error("影片上傳失敗:", error);
+                        alert(`❌ 上傳被拒絕！\n\n可能原因：\n1. Firebase Storage 尚未啟用\n2. 規則未設定為 allow read, write: if true;\n\n錯誤代碼：${error.code}`);
                         setUploadProgress(0);
-                        alert("✅ 影片同步完成");
+                    }, 
+                    async () => {
+                        try {
+                            const downloadURL = await window.FB.getDownloadURL(uploadTask.snapshot.ref);
+                            setHeader(prev => ({...prev, videoLink: downloadURL}));
+                            setUploadProgress(0);
+                            alert("✅ 影片成功上傳至雲端！");
+                        } catch (err) {
+                            alert("取得影片網址失敗：" + err.message);
+                            setUploadProgress(0);
+                        }
                     }
                 );
             };
@@ -310,6 +335,7 @@
                         let u = { ...m, [field]: val };
                         if (field === 'w') u.dw = val ? parseInt(val) - 48 : 0;
                         if (field === 'h') u.dh = val ? parseInt(val) - 30 : 0;
+                        if (field === 't') u.body = val;
                         return u;
                     }
                     return m;
@@ -327,7 +353,6 @@
                 ]);
             };
 
-            // 💎 徹底修復 Merge Overlap 問題，確保網格獨立不干擾
             const exportExcel = async () => {
                 setIsLoading(true);
                 try {
@@ -345,7 +370,6 @@
                         bottom: {style:'thin'}, right: {style:'thin'} 
                     };
 
-                    // 1. 頂部頁籤 (Row 1)
                     const tabs = ["工單扣法", "尺寸單(榮豐)", "採購單(框)", "採購單(門)", "尺寸單", "合約(未稅)"];
                     tabs.forEach((t, i) => {
                         const cell = sheet.getCell(1, i * 2 + 1);
@@ -355,16 +379,14 @@
                         sheet.mergeCells(1, i*2+1, 1, i*2+2);
                     });
 
-                    // 2. 完美 Logo (Row 2-4)
                     sheet.mergeCells('A2:A4');
                     if (logoImgBase64) {
                         const imageId = workbook.addImage({ base64: logoImgBase64, extension: 'png' });
                         sheet.addImage(imageId, { tl: { col: 0, row: 1 }, br: { col: 1, row: 4 } });
                     }
                     sheet.getCell('A2').border = borderAll;
-                    sheet.getCell('A2').value = ""; // 清空文字
+                    sheet.getCell('A2').value = ""; 
 
-                    // 3. 標題與訂單資訊 (Row 2-4)
                     sheet.mergeCells('B3:H4');
                     const title = sheet.getCell('B3');
                     title.value = '下 料 單'; title.font = { size: 24, bold: true };
@@ -376,29 +398,23 @@
                     sheet.getCell('I4').value = '丈量人員:'; 
                     sheet.mergeCells('J4:L4'); sheet.getCell('J4').value = header.surveyor;
 
-                    // 4. 基本資訊 (Row 5-7) - 嚴格劃分儲存格避免覆蓋
-                    // Row 5
                     sheet.mergeCells('A5:C5'); sheet.getCell('A5').value = '公    司:';
                     sheet.mergeCells('D5:F5'); sheet.getCell('D5').value = header.company || '';
                     sheet.getCell('I5').value = '丈量日期:'; 
                     sheet.mergeCells('J5:L5'); sheet.getCell('J5').value = new Date().toLocaleDateString();
                     
-                    // Row 6
                     sheet.mergeCells('A6:C6'); sheet.getCell('A6').value = '聯 絡 人:';
                     sheet.mergeCells('D6:F6'); sheet.getCell('D6').value = header.contact || '';
                     sheet.mergeCells('G6:H6'); sheet.getCell('G6').value = '電話:';
                     sheet.mergeCells('I6:L6'); sheet.getCell('I6').value = header.phone || '';
                     
-                    // Row 7
                     sheet.mergeCells('A7:C7'); sheet.getCell('A7').value = '案場地址:';
                     sheet.mergeCells('D7:L7'); sheet.getCell('D7').value = header.address || '';
                     
-                    // Apply borders Row 5-7
                     for(let r=5; r<=7; r++) {
                         for(let c=1; c<=12; c++) { sheet.getCell(r, c).border = borderAll; }
                     }
 
-                    // 5. 橘色樣式區 (Row 9)
                     sheet.getRow(9).height = 30;
                     sheet.mergeCells('A9:B9'); sheet.getCell('A9').value = "門框樣式:";
                     sheet.mergeCells('C9:F9'); sheet.getCell('C9').value = header.frameStyle;
@@ -407,7 +423,6 @@
                     ['A9','G9'].forEach(c => sheet.getCell(c).fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FFFDE9D9'} });
                     ['C9','I9'].forEach(c => { sheet.getCell(c).fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FFF4B084'} }; sheet.getCell(c).font = { bold:true, size:14 }; });
 
-                    // 6. 尺寸主表標題 (Row 11)
                     const hRow = sheet.getRow(11);
                     hRow.values = ['編號','洞寬','洞高','門寬','門高','牆厚','主體','線板','備註','樣式','門止','底'];
                     hRow.eachCell(c => { c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFF2F2F2'}}; c.border=borderAll; c.alignment={horizontal:'center'}; c.font={bold:true}; });
@@ -419,7 +434,6 @@
                         r.eachCell(c => { c.border=borderAll; c.alignment={horizontal:'center', vertical:'middle'}; if(c.column===9) c.font={color:{argb:'FFFF0000'}, bold:true}; });
                     });
 
-                    // 7. 精密網格標頭
                     const footStart = cur + 1;
                     sheet.mergeCells(`A${footStart}:D${footStart}`); 
                     sheet.getCell(`A${footStart}`).value = "框門注意事項: " + header.precautions;
@@ -429,7 +443,6 @@
 
                     const redR = footStart + 1;
                     
-                    // 🌟 左半部：灰底案場總結，佔用 A~D 欄 (共5列對齊右邊)
                     const firstM = measurements[0] || {};
                     const mw = firstM.w || 0; const mh = firstM.h || 0; const mt = firstM.t || 0;
                     const summary = `${mw}/${mh}/${mt}/房/隱/地板確認`;
@@ -448,7 +461,6 @@
                         sheet.getCell(`A${r}`).font = { size: 10, color: { argb: 'FF555555' } };
                     }
 
-                    // 🌟 右半部：紅字警示區，佔用 E~L 欄 (共5列)
                     sheet.mergeCells(`E${redR}:L${redR+4}`);
                     const redC = sheet.getCell(`E${redR}`);
                     redC.value = header.redNotice;
@@ -458,7 +470,6 @@
                         for(let c=5; c<=12; c++) { sheet.getCell(r, c).border = borderAll; }
                     }
 
-                    // 🌟 底部：五金網格 4 格資料行，只在 E~L 欄
                     const pR = redR + 5;
                     const partsH = ["防撞條", "鉸鏈", "門止", "把手"];
                     const partsV = [
@@ -469,7 +480,7 @@
                     ];
 
                     partsH.forEach((p, i) => {
-                        const sCol = i*2 + 5; // 精確計算: 5(E), 7(G), 9(I), 11(K)
+                        const sCol = i*2 + 5; 
                         sheet.mergeCells(pR, sCol, pR, sCol+1);
                         const head = sheet.getCell(pR, sCol);
                         head.value = p; head.alignment={horizontal:'center'}; head.font={bold:true};
@@ -485,12 +496,10 @@
                         });
                     }
 
-                    // 畫五金區的框線
                     for(let r=pR; r<=pR+4; r++) {
                         for(let c=5; c<=12; c++) { sheet.getCell(r, c).border = borderAll; }
                     }
 
-                    // 8. 底部簽名
                     const fin = pR + 5;
                     sheet.mergeCells(`E${fin}:H${fin}`);
                     sheet.getCell(`E${fin}`).value = "訂金: " + (header.deposit || "0");
@@ -562,11 +571,31 @@
                                 <div className="space-y-2 text-center">
                                     <label className="text-xs font-black text-slate-400 uppercase text-red-500">影片同步</label>
                                     <button onClick={()=>fileInputRef.current.click()} className="w-full bg-slate-50 py-3 rounded-2xl text-sm font-black border flex items-center justify-center gap-2">
-                                        {uploadProgress > 0 ? `${Math.round(uploadProgress)}%` : (header.videoLink ? <Icon name="check" className="w-4 h-4 text-emerald-500"/> : "上傳影片")}
+                                        {uploadProgress > 0 && uploadProgress < 100 ? <div className="w-5 h-5 border-3 border-blue-500 border-t-transparent rounded-full animate-spin"></div> : 
+                                         header.videoLink ? <Icon name="check" className="w-4 h-4 text-emerald-500"/> : <Icon name="upload" className="w-5 h-5"/>}
+                                        {uploadProgress > 0 && uploadProgress < 100 ? `${Math.round(uploadProgress)}%` : header.videoLink ? "影片已同步" : "上傳影片"}
                                     </button>
                                     <input type="file" ref={fileInputRef} hidden accept="video/*" onChange={handleVideoSelect} />
                                 </div>
                                 <button onClick={exportExcel} className="bg-emerald-600 text-white py-3 rounded-xl text-sm font-black shadow-lg mt-auto active:scale-95 transition-all">導出 Excel</button>
+                            </div>
+
+                            {videoUrl && (
+                                <div className="bg-black rounded-[2.5rem] overflow-hidden shadow-2xl aspect-video max-w-3xl mx-auto border-8 border-white relative group">
+                                    <video src={videoUrl} controls className="w-full h-full object-cover"></video>
+                                    <button onClick={() => {setVideoUrl(null); setHeader({...header, videoLink: ''}); if(fileInputRef.current) fileInputRef.current.value='';}} className="absolute top-6 right-6 bg-white/20 hover:bg-red-500 text-white p-4 rounded-full backdrop-blur-md transition-all shadow-xl"><Icon name="trash-2" className="w-7 h-7" /></button>
+                                </div>
+                            )}
+
+                            <div className="bg-orange-50 rounded-[2rem] p-8 border border-orange-100 grid grid-cols-2 gap-8 shadow-inner">
+                                <div className="space-y-2">
+                                    <label className="text-xs font-black text-orange-400 uppercase tracking-widest">門框樣式</label>
+                                    <input value={header.frameStyle} onChange={e=>setHeader({...header, frameStyle:e.target.value})} className="w-full bg-transparent border-b-2 border-orange-200 p-2 text-2xl font-bold text-orange-900 outline-none" />
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="text-xs font-black text-orange-400 uppercase tracking-widest">門片樣式</label>
+                                    <input value={header.doorStyle} onChange={e=>setHeader({...header, doorStyle:e.target.value})} className="w-full bg-transparent border-b-2 border-orange-200 p-2 text-2xl font-bold text-orange-900 outline-none" />
+                                </div>
                             </div>
 
                             <div className="bg-slate-900 rounded-[3.5rem] p-12 text-center relative overflow-hidden shadow-2xl border-8 border-white">
@@ -579,14 +608,14 @@
                             </div>
 
                             <div className="card overflow-hidden">
-                                <div className="p-6 bg-slate-50 border-b flex justify-between items-center">
+                                <div className="p-6 bg-slate-50 border-b flex justify-between items-center bg-slate-50/80">
                                     <h3 className="section-title italic">Zhiyang Order List</h3>
                                     <button onClick={addRow} className="bg-indigo-600 text-white px-6 py-3 rounded-2xl text-sm font-black active:scale-95 transition-all">+ 手動新增</button>
                                 </div>
-                                <div className="overflow-x-auto virtual-list">
+                                <div className="overflow-x-auto virtual-list no-scrollbar">
                                     <table className="w-full text-left min-w-[1100px] border-separate border-spacing-0">
                                         <thead className="bg-slate-50 text-sm text-slate-400 font-black uppercase sticky top-0 z-20 shadow-sm border-b">
-                                            <tr><th className="px-8 py-6">編號</th><th className="px-4 py-6 text-blue-700">洞寬</th><th className="px-4 py-6 text-blue-700">洞高</th><th className="px-4 py-6 text-emerald-600 border-x">門寬</th><th className="px-4 py-6 text-emerald-600 border-r">門高</th><th className="px-4 py-6">牆厚</th><th className="px-8 py-6">備註 / 樣式</th><th className="px-4 py-6"></th></tr>
+                                            <tr><th className="px-8 py-6">編號</th><th className="px-4 py-6 text-blue-700">洞寬</th><th className="px-4 py-6 text-blue-700">洞高</th><th className="px-4 py-6 text-emerald-600 border-x">門寬</th><th className="px-4 py-6 text-emerald-600 border-r">門高</th><th className="px-4 py-6 text-center">牆厚</th><th className="px-8 py-6">備註 / 樣式</th><th className="px-4 py-6"></th></tr>
                                         </thead>
                                         <tbody className="divide-y divide-slate-100">
                                             {measurements.map(m => (
@@ -636,7 +665,7 @@
                                     {allCases.map(c => (
                                         <div key={c.id} className="p-8 hover:bg-slate-50 transition-all flex justify-between items-center cursor-pointer group" onClick={() => loadCase(c)}>
                                             <div className="space-y-1">
-                                                <p className="text-blue-600 font-black text-3xl tracking-tighter">{c.orderNo}</p>
+                                                <p className="text-blue-600 font-black text-3xl mb-1 tracking-tighter">{c.orderNo}</p>
                                                 <p className="text-xl font-bold text-slate-500">{c.address}</p>
                                                 <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">同步時間: {new Date(c.updatedAt).toLocaleString()}</p>
                                             </div>
