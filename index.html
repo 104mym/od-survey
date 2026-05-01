@@ -52,9 +52,9 @@
             return <span ref={ref} className="inline-flex items-center justify-center" />;
         };
 
-        // 🚀 版本號：v1.1.1 (解決 403 Unregistered Callers 終極方案)
-        const version = "v1.1.1";
-        // 🚀 核心：請確認此處金鑰正確無誤
+        // 🚀 版本號：v1.1.2 (修正 404 Model Not Found 網址路徑問題)
+        const version = "v1.1.2";
+        // 🚀 核心：您的 Gemini API Key
         const apiKey = "AIzaSyCBBjJwbHHvuTDvgJbyUZzHOYyE5Owa5bg"; 
 
         const App = () => {
@@ -154,13 +154,13 @@
 欄位：header(address, partHandle, partCollision, partStop, partHinge, redNotice, precautions, orderRemark), items(no, w, h, t, note)。`;
 
                 try {
-                    // 🛠️ 終極修復方案：改用 v1beta 並強化 Headers 傳遞
-                    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+                    // 🛠️ 核心修正：改用 v1 正式版 URL，解決 v1beta 模型 404 問題
+                    const url = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
                     const resp = await fetch(url, {
                         method: 'POST',
                         headers: { 
                             'Content-Type': 'application/json',
-                            'x-goog-api-key': apiKey // 保險 1：Google 專用 Header
+                            'x-goog-api-key': apiKey 
                         },
                         body: JSON.stringify({
                             contents: [{ parts: [{ text: `語音內容：${text}` }] }],
@@ -181,7 +181,7 @@
                     if (!resp.ok) {
                         const errData = await resp.json();
                         const msg = errData.error?.message || "未知 API 錯誤";
-                        throw new Error(`Google 拒絕連線 (狀態 ${resp.status}): ${msg}`);
+                        throw new Error(`Google 連線異常 (狀態 ${resp.status}): ${msg}`);
                     }
 
                     const data = await resp.json();
