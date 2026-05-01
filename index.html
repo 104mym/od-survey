@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>丈量尺寸 - 旗艦正式版</title>
+    <title>智揚雲端下料助手 - 管理員旗艦版</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -38,7 +38,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        // 安全圖示元件
+        // 安全圖示元件：避免 React DOM 衝突崩潰
         const Icon = ({ name, className }) => {
             const ref = useRef(null);
             useEffect(() => {
@@ -57,7 +57,7 @@
             return <span ref={ref} className="inline-flex items-center justify-center" />;
         };
 
-        const apiKey = ""; // Gemini API 密鑰 (執行環境會自動提供，無需手動填寫)
+        const apiKey = ""; // Gemini API 密鑰
 
         const App = () => {
             const [view, setView] = useState("main"); 
@@ -70,6 +70,7 @@
             const [isRecording, setIsRecording] = useState(false);
             const [transcript, setTranscript] = useState("");
             const [mode, setMode] = useState("Local");
+            
             const [videoUrl, setVideoUrl] = useState(null); 
             const [uploadProgress, setUploadProgress] = useState(0); 
             const [deleteConfirm, setDeleteConfirm] = useState(null);
@@ -81,7 +82,10 @@
 
             const getTodayDateStr = () => {
                 const now = new Date();
-                return `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+                const y = now.getFullYear();
+                const m = String(now.getMonth() + 1).padStart(2, '0');
+                const d = String(now.getDate()).padStart(2, '0');
+                return `${y}${m}${d}`;
             };
 
             const [header, setHeader] = useState({
@@ -156,6 +160,7 @@
                     recognitionRef.current.continuous = true; 
                     recognitionRef.current.interimResults = true; 
                     recognitionRef.current.lang = 'zh-TW';
+                    
                     recognitionRef.current.onresult = (e) => {
                         let interim = "";
                         let finalStr = "";
@@ -166,18 +171,24 @@
                         if (finalStr) transcriptAccumulator.current += finalStr + " ";
                         setTranscript(transcriptAccumulator.current + interim);
                     };
+                    
                     recognitionRef.current.onend = () => {
                         if (isRecording) { try { recognitionRef.current.start(); } catch(e){} }
                     };
+                    
+                    recognitionRef.current.onerror = () => setIsRecording(false);
                 }
             }, []);
 
             useEffect(() => {
                 let interval;
-                if (isRecording) interval = setInterval(() => setTimer(prev => prev + 1), 1000);
-                else clearInterval(interval);
+                if (isRecording) {
+                    interval = setInterval(() => setTimer(prev => prev + 1), 1000);
+                } else if (!isRecording && timer !== 0) {
+                    clearInterval(interval);
+                }
                 return () => clearInterval(interval);
-            }, [isRecording]);
+            }, [isRecording, timer]);
 
             const fetchHistory = (fdb) => {
                 try {
@@ -189,38 +200,48 @@
                 } catch(e){}
             };
 
+            // 💎 AI 強化解析模組 (修復解析失敗)
             const parseSpeech = async (text) => {
-                // 移除了 apiKey 的驗證，確保在 Canvas 環境中能夠正常觸發請求
                 if (!text.trim()) return;
                 setIsLoading(true);
-                const prompt = `你是一個專業裝潢丈量助理。請將語音解析為 JSON。
-                1. 如果提到地址、備註、注意事項、或五金零件(防撞條、鉸鏈、門止、把手)，放入 "header" 對象中。
-                2. 如果提到尺寸數據，放入 "items" 陣列中。
-                3. 計算規則：門寬=洞寬-48, 門高=洞高-30。
                 
-                輸出格式範例：
-                {
-                    "header": { "address": "...", "precautions": "...", "partHandle": "..." },
-                    "items": [ { "no": "1.", "w": 898, "h": 2190, "t": 125, "note": "..." } ]
-                }
-                語音內容：${text}
-                只回傳 JSON，不要廢話。`;
+                const systemPrompt = `你是一個專業裝潢丈量助理。請將語音解析為 JSON 格式。
+1. 如果提到地址、備註、注意事項、或五金零件(防撞條、鉸鏈、門止、把手)，放入 "header" 對象中。
+2. 如果提到尺寸數據，放入 "items" 陣列中。
+3. 尺寸計算規則：門寬=洞寬-48, 門高=洞高-30。
+
+絕對只回傳 JSON 格式，不要加上任何 Markdown、引號或對話文字。
+輸出格式範例：
+{
+    "header": { "address": "...", "precautions": "...", "partHandle": "..." },
+    "items": [ { "no": "1.", "w": 898, "h": 2190, "t": 125, "note": "..." } ]
+}`;
 
                 try {
                     const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+                        body: JSON.stringify({ 
+                            contents: [{ parts: [{ text: `語音內容：${text}` }] }],
+                            systemInstruction: { parts: [{ text: systemPrompt }] },
+                            // 強制鎖定 JSON 輸出，防止亂回話
+                            generationConfig: { responseMimeType: "application/json" }
+                        })
                     });
+
+                    if (!resp.ok) throw new Error("API 回應異常");
+                    
                     const data = await resp.json();
-                    const clean = data.candidates[0].content.parts[0].text.replace(/```json|```/g, "").trim();
-                    const p = JSON.parse(clean);
+                    if (!data.candidates || !data.candidates[0].content) throw new Error("AI 未回傳有效資料");
+
+                    const cleanText = data.candidates[0].content.parts[0].text.trim();
+                    const p = JSON.parse(cleanText);
                     
                     if (p.header) {
                         setHeader(prev => ({ ...prev, ...p.header }));
                     }
 
-                    if (p.items && p.items.length > 0) {
+                    if (p.items && Array.isArray(p.items) && p.items.length > 0) {
                         setMeasurements(prev => {
                             const newItems = p.items.map((item, idx) => ({
                                 id: Date.now() + Math.random(),
@@ -231,14 +252,18 @@
                                 t: parseInt(item.t) || 0,
                                 body: parseInt(item.t) || 0,
                                 trim: 50,
-                                note: item.note || "",
-                                style: "房", stop: "隱", base: ""
+                                style: item.style || "房", 
+                                stop: item.stop || "隱", 
+                                base: item.base || "",
+                                note: item.note || ""
                             }));
                             return [...prev, ...newItems];
                         });
                     }
-                } catch (e) { alert("AI 解析失敗，請手動確認。"); }
-                finally { 
+                } catch (e) { 
+                    console.error("AI 錯誤:", e);
+                    alert("AI 解析失敗，請嘗試講慢一點，或檢查網路。詳細: " + e.message); 
+                } finally { 
                     setIsLoading(false); 
                     transcriptAccumulator.current = "";
                     setTranscript("");
@@ -246,11 +271,10 @@
             };
 
             const toggleRecording = () => {
-                if (!recognitionRef.current) return alert("瀏覽器不支援語音");
+                if (!recognitionRef.current) return alert("您的瀏覽器不支援語音辨識");
                 if (isRecording) {
                     recognitionRef.current.stop();
                     setIsRecording(false);
-                    // 確保只要有累積語音就進行解析，不檢查 apiKey 變數
                     if (transcriptAccumulator.current) {
                         parseSpeech(transcriptAccumulator.current);
                     }
@@ -271,7 +295,7 @@
                 setVideoUrl(URL.createObjectURL(file));
 
                 if (!storage || mode === "Local") {
-                    alert("目前為本地模式。請手動上傳後貼上網址，或連線雲端後上傳。");
+                    alert("目前為單機模式，請檢查網路，無法上傳雲端。");
                     return;
                 }
 
@@ -284,7 +308,7 @@
                         setUploadProgress(progress);
                     }, 
                     (error) => {
-                        alert("影片上傳失敗！檔案可能過大。");
+                        alert("影片上傳失敗！");
                         setUploadProgress(0);
                     }, 
                     async () => {
@@ -297,13 +321,16 @@
             };
 
             const handleSync = async () => {
-                if (!db) return alert("雲端未連通");
+                if (mode === "Local" || !db) return alert("目前為單機模式，請檢查網路。");
                 setIsLoading(true);
                 try {
                     const docRef = window.FB.doc(db, 'artifacts', FIREBASE_APP_ID, 'public', 'data', 'cases', header.orderNo);
                     await window.FB.setDoc(docRef, { ...header, items: measurements, updatedAt: new Date().toISOString() });
-                    alert("✅ 同步成功");
-                } catch (e) { alert("同步失敗"); }
+                    alert("✅ 雲端同步成功！");
+                } catch (e) { 
+                    alert("同步失敗"); 
+                    console.error(e);
+                }
                 finally { setIsLoading(false); }
             };
 
@@ -349,9 +376,12 @@
                         { width: 7 }, { width: 7 }
                     ];
 
-                    const thin = { style:'thin' };
-                    const borderAll = { top: thin, left: thin, bottom: thin, right: thin };
+                    const borderAll = { 
+                        top: {style:'thin'}, left: {style:'thin'}, 
+                        bottom: {style:'thin'}, right: {style:'thin'} 
+                    };
 
+                    // 1. 頂部頁籤
                     const tabs = ["工單扣法", "尺寸單(榮豐)", "採購單(框)", "採購單(門)", "尺寸單", "合約(未稅)"];
                     tabs.forEach((t, i) => {
                         const cell = sheet.getCell(1, i * 2 + 1);
@@ -361,42 +391,48 @@
                         sheet.mergeCells(1, i*2+1, 1, i*2+2);
                     });
 
+                    // 2. 完美 Logo
                     sheet.mergeCells('A2:A4');
                     if (logoImgBase64) {
                         const imageId = workbook.addImage({ base64: logoImgBase64, extension: 'png' });
                         sheet.addImage(imageId, { tl: { col: 0, row: 1 }, br: { col: 1, row: 4 } });
                     }
                     sheet.getCell('A2').border = borderAll;
-                    sheet.getCell('A2').value = ""; 
+                    sheet.getCell('A2').value = ""; // 清空，不與圖片重疊
 
-                    sheet.mergeCells('B3:H4');
-                    const title = sheet.getCell('B3');
+                    // 3. 標題與訂單資訊
+                    sheet.mergeCells('B2:H4');
+                    const title = sheet.getCell('B2');
                     title.value = '下 料 單'; title.font = { size: 24, bold: true };
                     title.alignment = { vertical:'middle', horizontal:'center' };
                     
-                    sheet.getCell('I3').value = '訂單編號:'; 
-                    sheet.mergeCells('J3:L3'); sheet.getCell('J3').value = header.orderNo;
+                    sheet.getCell('I2').value = '訂單編號:'; 
+                    sheet.mergeCells('J2:L2'); sheet.getCell('J2').value = header.orderNo;
                     
-                    sheet.getCell('I4').value = '丈量人員:'; 
-                    sheet.mergeCells('J4:L4'); sheet.getCell('J4').value = header.surveyor;
+                    sheet.getCell('I3').value = '丈量人員:'; 
+                    sheet.mergeCells('J3:L3'); sheet.getCell('J3').value = header.surveyor;
+                    
+                    sheet.getCell('I4').value = '丈量日期:'; 
+                    sheet.mergeCells('J4:L4'); sheet.getCell('J4').value = header.date;
 
-                    sheet.mergeCells('A5:C5'); sheet.getCell('A5').value = '公    司:';
-                    sheet.mergeCells('D5:F5'); sheet.getCell('D5').value = header.company || '';
-                    sheet.getCell('I5').value = '丈量日期:'; 
-                    sheet.mergeCells('J5:L5'); sheet.getCell('J5').value = new Date().toLocaleDateString();
-                    
-                    sheet.mergeCells('A6:C6'); sheet.getCell('A6').value = '聯 絡 人:';
-                    sheet.mergeCells('D6:F6'); sheet.getCell('D6').value = header.contact || '';
-                    sheet.mergeCells('G6:H6'); sheet.getCell('G6').value = '電話:';
-                    sheet.mergeCells('I6:L6'); sheet.getCell('I6').value = header.phone || '';
-                    
-                    sheet.mergeCells('A7:C7'); sheet.getCell('A7').value = '案場地址:';
-                    sheet.mergeCells('D7:L7'); sheet.getCell('D7').value = header.address || '';
-                    
-                    for(let r=5; r<=7; r++) {
-                        for(let c=1; c<=12; c++) { sheet.getCell(r, c).border = borderAll; }
-                    }
+                    // 4. 客戶基本資訊
+                    const meta = [
+                        {a:'公    司:', d:header.company},
+                        {a:'聯 絡 人:', d:header.contact, g:'電話:', h:header.phone},
+                        {a:'案場地址:', d:header.address}
+                    ];
+                    meta.forEach((m, idx) => {
+                        const r = 5 + idx;
+                        sheet.mergeCells(`A${r}:C${r}`); sheet.getCell(`A${r}`).value = m.a;
+                        sheet.mergeCells(`D${r}:F${r}`); sheet.getCell(`D${r}`).value = m.d;
+                        if(m.g) { sheet.mergeCells(`G${r}:H${r}`); sheet.getCell(`G${r}`).value = m.g; sheet.mergeCells(`I${r}:L${r}`); sheet.getCell(`I${r}`).value = m.h; }
+                        else { sheet.mergeCells(`G${r}:L${r}`); }
+                        sheet.getRow(r).eachCell(c => c.border = borderAll);
+                    });
+                    // 地址列橫跨到底
+                    sheet.mergeCells(`D7:L7`); sheet.getCell('D7').value = header.address;
 
+                    // 5. 橘色樣式區
                     sheet.getRow(9).height = 30;
                     sheet.mergeCells('A9:B9'); sheet.getCell('A9').value = "門框樣式:";
                     sheet.mergeCells('C9:F9'); sheet.getCell('C9').value = header.frameStyle;
@@ -405,6 +441,7 @@
                     ['A9','G9'].forEach(c => sheet.getCell(c).fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FFFDE9D9'} });
                     ['C9','I9'].forEach(c => { sheet.getCell(c).fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FFF4B084'} }; sheet.getCell(c).font = { bold:true, size:14 }; });
 
+                    // 6. 尺寸主表標題
                     const hRow = sheet.getRow(11);
                     hRow.values = ['編號','洞寬','洞高','門寬','門高','牆厚','主體','線板','備註','樣式','門止','底'];
                     hRow.eachCell(c => { c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFF2F2F2'}}; c.border=borderAll; c.alignment={horizontal:'center'}; c.font={bold:true}; });
@@ -416,8 +453,8 @@
                         r.eachCell(c => { c.border=borderAll; c.alignment={horizontal:'center', vertical:'middle'}; if(c.column===9) c.font={color:{argb:'FFFF0000'}, bold:true}; });
                     });
 
+                    // 7. 精密網格標頭
                     const footStart = cur + 1;
-                    
                     sheet.mergeCells(`A${footStart}:D${footStart}`); 
                     sheet.getCell(`A${footStart}`).value = "框門注意事項: " + header.precautions;
                     sheet.mergeCells(`E${footStart}:L${footStart}`); 
@@ -426,6 +463,7 @@
 
                     const redR = footStart + 1;
                     
+                    // 左半部：灰底案場總結
                     const firstM = measurements[0] || {};
                     const mw = firstM.w || 0; const mh = firstM.h || 0; const mt = firstM.t || 0;
                     const summary = `${mw}/${mh}/${mt}/房/隱/地板確認`;
@@ -444,6 +482,7 @@
                         sheet.getCell(`A${r}`).font = { size: 10, color: { argb: 'FF555555' } };
                     }
 
+                    // 右半部：紅字警示區
                     sheet.mergeCells(`E${redR}:L${redR+4}`);
                     const redC = sheet.getCell(`E${redR}`);
                     redC.value = header.redNotice;
@@ -453,6 +492,7 @@
                         for(let c=5; c<=12; c++) { sheet.getCell(r, c).border = borderAll; }
                     }
 
+                    // 右半部：五金網格 4 格資料行
                     const pR = redR + 5;
                     const partsH = ["防撞條", "鉸鏈", "門止", "把手"];
                     const partsV = [
@@ -479,10 +519,12 @@
                         });
                     }
 
+                    // 五金區的框線
                     for(let r=pR; r<=pR+4; r++) {
                         for(let c=5; c<=12; c++) { sheet.getCell(r, c).border = borderAll; }
                     }
 
+                    // 8. 底部簽名
                     const fin = pR + 5;
                     sheet.mergeCells(`E${fin}:H${fin}`);
                     sheet.getCell(`E${fin}`).value = "訂金: " + (header.deposit || "0");
@@ -619,9 +661,9 @@
                                                     <td className="px-4 py-6"><input type="number" value={m.t} onChange={e=>handleUpdateRow(m.id, 't', e.target.value)} className="w-full bg-transparent border-none p-0 text-2xl font-bold text-center focus:ring-0" /></td>
                                                     <td className="px-8 py-6 flex flex-col gap-3">
                                                         <div className="flex gap-3"><span className="badge">房間門</span><span className="badge">隱形門止</span></div>
-                                                        <input value={m.note} onChange={e=>handleUpdateRow(m.id, 'note', e.target.value)} className="w-full bg-transparent border-none p-0 text-sm text-slate-500 font-bold italic" placeholder="點此輸入現場狀況..." />
+                                                        <input value={m.note} onChange={e=>handleUpdateRow(m.id, 'note', e.target.value)} className="w-full bg-transparent border-none p-0 text-sm text-slate-500 font-bold italic" placeholder="點此輸入備註..." />
                                                     </td>
-                                                    <td className="px-4 py-6 text-center"><button onClick={() => setMeasurements(measurements.filter(x=>x.id!==m.id))} className="text-slate-300 hover:text-red-500 p-3 bg-slate-50 hover:bg-red-50 rounded-2xl transition-all opacity-0 group-hover:opacity-100"><Icon name="trash-2" className="w-6 h-6" /></button></td>
+                                                    <td className="px-4 py-6 text-center"><button onClick={() => setMeasurements(measurements.filter(x=>x.id!==m.id))} className="text-slate-300 hover:text-red-500 transition-all opacity-0 group-hover:opacity-100"><Icon name="trash-2" className="w-7 h-7" /></button></td>
                                                 </tr>
                                             ))}
                                         </tbody>
@@ -630,7 +672,7 @@
                             </div>
 
                             <div className="card p-10 space-y-10">
-                                <h3 className="section-title uppercase tracking-widest">五金零件與案場備註</h3>
+                                <h3 className="section-title uppercase tracking-[0.2em]">五金配件與精密備註</h3>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
                                     <div className="space-y-6">
                                         <div className="space-y-2"><label className="text-xs font-black text-blue-500 uppercase">框門注意事項</label><textarea rows="2" value={header.precautions} onChange={e=>setHeader({...header, precautions:e.target.value})} className="w-full bg-slate-50 border rounded-2xl p-5 text-xl font-bold resize-none" /></div>
@@ -654,7 +696,7 @@
                                 <div className="p-8 bg-slate-900 text-white flex justify-between items-center rounded-t-[2.5rem]"><h3 className="font-black italic uppercase text-2xl tracking-widest">存檔歷史紀錄</h3><span className="bg-blue-600 px-4 py-1 rounded-full text-xs font-black">{allCases.length} 案存檔</span></div>
                                 <div className="divide-y divide-slate-100">
                                     {allCases.map(c => (
-                                        <div key={c.id} className="p-8 hover:bg-slate-50 transition-all flex justify-between items-center cursor-pointer group" onClick={() => { setHeader({...c}); setMeasurements(c.items || []); setView("main"); }}>
+                                        <div key={c.id} className="p-8 hover:bg-slate-50 transition-all flex justify-between items-center cursor-pointer group" onClick={() => loadCase(c)}>
                                             <div className="space-y-1">
                                                 <p className="text-blue-600 font-black text-3xl mb-1 tracking-tighter">{c.orderNo}</p>
                                                 <p className="text-xl font-bold text-slate-500">{c.address}</p>
@@ -666,7 +708,6 @@
                                             </div>
                                         </div>
                                     ))}
-                                    {allCases.length === 0 && <div className="p-32 text-center text-slate-300 font-black uppercase tracking-[0.5em] italic">No History Found</div>}
                                 </div>
                             </div>
                         </main>
