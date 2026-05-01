@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>智揚雲端下料助手 - 管理員旗艦版</title>
+    <title>丈量尺寸 - 旗艦正式版</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -48,7 +48,11 @@
                     window.lucide.createIcons({ root: temp });
                     const svg = temp.querySelector('svg');
                     if (svg) {
-                        if (className) className.split(' ').forEach(c => { if (c.trim()) svg.classList.add(c.trim()); });
+                        if (className) {
+                            className.split(' ').forEach(c => {
+                                if (c.trim()) svg.classList.add(c.trim());
+                            });
+                        }
                         ref.current.innerHTML = '';
                         ref.current.appendChild(svg);
                     }
@@ -57,7 +61,7 @@
             return <span ref={ref} className="inline-flex items-center justify-center" />;
         };
 
-        const apiKey = ""; // Gemini API 密鑰
+        const apiKey = ""; // 執行環境自動提供
 
         const App = () => {
             const [view, setView] = useState("main"); 
@@ -79,6 +83,8 @@
             const recognitionRef = useRef(null);
             const fileInputRef = useRef(null);
             const transcriptAccumulator = useRef(""); 
+
+            const FIREBASE_APP_ID = 'od-survey-system';
 
             const getTodayDateStr = () => {
                 const now = new Date();
@@ -105,31 +111,15 @@
 
             const [timer, setTimer] = useState(0);
 
-            const firebaseConfig = {
-                apiKey: "AIzaSyBEcCQcuwCh30xDmj3wE-3CM2YffgIxfAk",
-                authDomain: "tao-men.firebaseapp.com",
-                projectId: "tao-men",
-                storageBucket: "tao-men.firebasestorage.app",
-                messagingSenderId: "332609297071",
-                appId: "1:332609297071:web:03593a930475c97b87525a"
-            };
-
-            const FIREBASE_APP_ID = 'od-survey-system';
-
-            const getLogoBase64 = async () => {
-                return new Promise((resolve) => {
-                    const canvas = document.createElement('canvas');
-                    canvas.width = 200; canvas.height = 200;
-                    const ctx = canvas.getContext('2d');
-                    ctx.fillStyle = 'white'; ctx.fillRect(0, 0, 200, 200);
-                    ctx.beginPath(); ctx.arc(100, 85, 70, 0, 2 * Math.PI);
-                    ctx.lineWidth = 14; ctx.strokeStyle = 'black'; ctx.stroke();
-                    ctx.font = '900 90px "Noto Serif TC", serif'; ctx.fillStyle = 'black';
-                    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('匠', 100, 95);
-                    ctx.font = '900 24px "Noto Sans TC", sans-serif'; ctx.fillText('門扉美學館', 100, 185);
-                    resolve(canvas.toDataURL('image/png'));
-                });
-            };
+            useEffect(() => {
+                let interval;
+                if (isRecording) {
+                    interval = setInterval(() => setTimer(prev => prev + 1), 1000);
+                } else if (!isRecording && timer !== 0) {
+                    clearInterval(interval);
+                }
+                return () => clearInterval(interval);
+            }, [isRecording, timer]);
 
             useEffect(() => {
                 getLogoBase64().then(url => setLogoImgBase64(url));
@@ -137,15 +127,28 @@
                 const init = async () => {
                     try {
                         if (!window.FB) return;
+                        
+                        const firebaseConfig = {
+                            apiKey: "AIzaSyBEcCQcuwCh30xDmj3wE-3CM2YffgIxfAk",
+                            authDomain: "tao-men.firebaseapp.com",
+                            projectId: "tao-men",
+                            storageBucket: "tao-men.firebasestorage.app",
+                            messagingSenderId: "332609297071",
+                            appId: "1:332609297071:web:03593a930475c97b87525a"
+                        };
+                        
                         const app = window.FB.initializeApp(firebaseConfig);
                         const firestore = window.FB.getFirestore(app);
                         const storageInstance = window.FB.getStorage(app);
                         setDb(firestore);
                         setStorage(storageInstance);
+                        
+                        const auth = window.FB.getAuth(app);
+                        
                         setMode("Cloud");
                         fetchHistory(firestore);
                         setIsReady(true);
-                        const auth = window.FB.getAuth(app);
+                        
                         window.FB.signInAnonymously(auth).catch(e => console.log("Auth skipped"));
                     } catch (e) { 
                         setMode("Local");
@@ -173,22 +176,14 @@
                     };
                     
                     recognitionRef.current.onend = () => {
-                        if (isRecording) { try { recognitionRef.current.start(); } catch(e){} }
+                        if (isRecording) {
+                            try { recognitionRef.current.start(); } catch(e){}
+                        }
                     };
                     
                     recognitionRef.current.onerror = () => setIsRecording(false);
                 }
             }, []);
-
-            useEffect(() => {
-                let interval;
-                if (isRecording) {
-                    interval = setInterval(() => setTimer(prev => prev + 1), 1000);
-                } else if (!isRecording && timer !== 0) {
-                    clearInterval(interval);
-                }
-                return () => clearInterval(interval);
-            }, [isRecording, timer]);
 
             const fetchHistory = (fdb) => {
                 try {
@@ -200,48 +195,36 @@
                 } catch(e){}
             };
 
-            // 💎 AI 強化解析模組 (修復解析失敗)
             const parseSpeech = async (text) => {
                 if (!text.trim()) return;
                 setIsLoading(true);
+                const prompt = `你是一個專業裝潢丈量助理。請將語音解析為 JSON。
+                1. 如果提到案場地址、備註、或配件(防撞條、鉸鏈、門止、把手)，填入 "header"。
+                2. 如果提到尺寸，填入 "items"。計算規則：門寬=洞寬-48, 門高=洞高-30。
                 
-                const systemPrompt = `你是一個專業裝潢丈量助理。請將語音解析為 JSON 格式。
-1. 如果提到地址、備註、注意事項、或五金零件(防撞條、鉸鏈、門止、把手)，放入 "header" 對象中。
-2. 如果提到尺寸數據，放入 "items" 陣列中。
-3. 尺寸計算規則：門寬=洞寬-48, 門高=洞高-30。
-
-絕對只回傳 JSON 格式，不要加上任何 Markdown、引號或對話文字。
-輸出格式範例：
-{
-    "header": { "address": "...", "precautions": "...", "partHandle": "..." },
-    "items": [ { "no": "1.", "w": 898, "h": 2190, "t": 125, "note": "..." } ]
-}`;
+                輸出格式：
+                {
+                    "header": { "address": "...", "precautions": "...", "partStop": "..." },
+                    "items": [ { "no": "1.", "w": 898, "h": 2190, "t": 125, "note": "..." } ]
+                }
+                語音：${text}
+                只回傳 JSON，不要任何文字解釋。`;
 
                 try {
                     const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ 
-                            contents: [{ parts: [{ text: `語音內容：${text}` }] }],
-                            systemInstruction: { parts: [{ text: systemPrompt }] },
-                            // 強制鎖定 JSON 輸出，防止亂回話
-                            generationConfig: { responseMimeType: "application/json" }
-                        })
+                        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
                     });
-
-                    if (!resp.ok) throw new Error("API 回應異常");
-                    
                     const data = await resp.json();
-                    if (!data.candidates || !data.candidates[0].content) throw new Error("AI 未回傳有效資料");
-
-                    const cleanText = data.candidates[0].content.parts[0].text.trim();
-                    const p = JSON.parse(cleanText);
+                    const clean = data.candidates[0].content.parts[0].text.replace(/```json|```/g, "").trim();
+                    const p = JSON.parse(clean);
                     
                     if (p.header) {
                         setHeader(prev => ({ ...prev, ...p.header }));
                     }
 
-                    if (p.items && Array.isArray(p.items) && p.items.length > 0) {
+                    if (p.items && p.items.length > 0) {
                         setMeasurements(prev => {
                             const newItems = p.items.map((item, idx) => ({
                                 id: Date.now() + Math.random(),
@@ -250,19 +233,14 @@
                                 dw: item.w ? parseInt(item.w) - 48 : 0, 
                                 dh: item.h ? parseInt(item.h) - 30 : 0, 
                                 t: parseInt(item.t) || 0,
-                                body: parseInt(item.t) || 0,
-                                trim: 50,
-                                style: item.style || "房", 
-                                stop: item.stop || "隱", 
-                                base: item.base || "",
                                 note: item.note || ""
                             }));
                             return [...prev, ...newItems];
                         });
                     }
                 } catch (e) { 
-                    console.error("AI 錯誤:", e);
-                    alert("AI 解析失敗，請嘗試講慢一點，或檢查網路。詳細: " + e.message); 
+                    console.error(e);
+                    alert("AI 解析失敗，請手動確認數據。"); 
                 } finally { 
                     setIsLoading(false); 
                     transcriptAccumulator.current = "";
@@ -294,8 +272,8 @@
                 if (!file) return;
                 setVideoUrl(URL.createObjectURL(file));
 
-                if (!storage || mode === "Local") {
-                    alert("目前為單機模式，請檢查網路，無法上傳雲端。");
+                if (!storage) {
+                    alert("雲端空間未連線。");
                     return;
                 }
 
@@ -303,17 +281,11 @@
                 const uploadTask = window.FB.uploadBytesResumable(storageRef, file);
 
                 uploadTask.on('state_changed', 
-                    (snapshot) => {
-                        const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-                        setUploadProgress(progress);
-                    }, 
-                    (error) => {
-                        alert("影片上傳失敗！");
-                        setUploadProgress(0);
-                    }, 
+                    (snapshot) => setUploadProgress((snapshot.bytesTransferred / snapshot.totalBytes) * 100), 
+                    (error) => alert("影片上傳失敗"), 
                     async () => {
-                        const downloadURL = await window.FB.getDownloadURL(uploadTask.snapshot.ref);
-                        setHeader(prev => ({...prev, videoLink: downloadURL}));
+                        const url = await window.FB.getDownloadURL(uploadTask.snapshot.ref);
+                        setHeader(prev => ({...prev, videoLink: url}));
                         setUploadProgress(0);
                         alert("✅ 影片上傳完成！");
                     }
@@ -321,16 +293,13 @@
             };
 
             const handleSync = async () => {
-                if (mode === "Local" || !db) return alert("目前為單機模式，請檢查網路。");
+                if (!db) return alert("雲端未連通");
                 setIsLoading(true);
                 try {
                     const docRef = window.FB.doc(db, 'artifacts', FIREBASE_APP_ID, 'public', 'data', 'cases', header.orderNo);
                     await window.FB.setDoc(docRef, { ...header, items: measurements, updatedAt: new Date().toISOString() });
                     alert("✅ 雲端同步成功！");
-                } catch (e) { 
-                    alert("同步失敗"); 
-                    console.error(e);
-                }
+                } catch (e) { alert("同步失敗"); }
                 finally { setIsLoading(false); }
             };
 
@@ -345,12 +314,7 @@
                 finally { setIsLoading(false); }
             };
 
-            const loadCase = (c) => { 
-                setHeader({ ...c }); 
-                setMeasurements(c.items || []); 
-                setVideoUrl(null); 
-                setView("main"); 
-            };
+            const loadCase = (c) => { setHeader({ ...c }); setMeasurements(c.items || []); setVideoUrl(null); setView("main"); };
 
             const handleUpdateRow = (id, field, val) => {
                 setMeasurements(prev => prev.map(m => {
@@ -364,60 +328,44 @@
                 }));
             };
 
+            const getLogoBase64 = async () => {
+                return new Promise((resolve) => {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = 200; canvas.height = 200;
+                    const ctx = canvas.getContext('2d');
+                    ctx.fillStyle = 'white'; ctx.fillRect(0, 0, 200, 200);
+                    ctx.beginPath(); ctx.arc(100, 85, 70, 0, 2 * Math.PI);
+                    ctx.lineWidth = 14; ctx.strokeStyle = 'black'; ctx.stroke();
+                    ctx.font = '900 90px "Noto Serif TC", serif'; ctx.fillStyle = 'black';
+                    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('匠', 100, 95);
+                    ctx.font = '900 24px "Noto Sans TC", sans-serif'; ctx.fillText('門扉美學館', 100, 185);
+                    resolve(canvas.toDataURL('image/png'));
+                });
+            };
+
             const exportExcel = async () => {
                 setIsLoading(true);
                 try {
                     const workbook = new window.ExcelJS.Workbook();
                     const sheet = workbook.addWorksheet('下料單');
+                    sheet.columns = [{ width: 8 }, { width: 10 }, { width: 10 }, { width: 10 }, { width: 10 }, { width: 8 }, { width: 8 }, { width: 8 }, { width: 30 }, { width: 7 }, { width: 7 }, { width: 7 }];
+                    const borderAll = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
 
-                    sheet.columns = [
-                        { width: 8 }, { width: 10 }, { width: 10 }, { width: 10 }, { width: 10 },
-                        { width: 8 }, { width: 8 }, { width: 8 }, { width: 30 }, { width: 7 },
-                        { width: 7 }, { width: 7 }
-                    ];
-
-                    const borderAll = { 
-                        top: {style:'thin'}, left: {style:'thin'}, 
-                        bottom: {style:'thin'}, right: {style:'thin'} 
-                    };
-
-                    // 1. 頂部頁籤
-                    const tabs = ["工單扣法", "尺寸單(榮豐)", "採購單(框)", "採購單(門)", "尺寸單", "合約(未稅)"];
-                    tabs.forEach((t, i) => {
-                        const cell = sheet.getCell(1, i * 2 + 1);
-                        cell.value = t; cell.alignment = { horizontal:'center' };
-                        cell.fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FF6688AA'} };
-                        cell.font = { color:{argb:'FFFFFFFF'}, bold:true, size:10 };
-                        sheet.mergeCells(1, i*2+1, 1, i*2+2);
-                    });
-
-                    // 2. 完美 Logo
                     sheet.mergeCells('A2:A4');
                     if (logoImgBase64) {
                         const imageId = workbook.addImage({ base64: logoImgBase64, extension: 'png' });
                         sheet.addImage(imageId, { tl: { col: 0, row: 1 }, br: { col: 1, row: 4 } });
                     }
                     sheet.getCell('A2').border = borderAll;
-                    sheet.getCell('A2').value = ""; // 清空，不與圖片重疊
 
-                    // 3. 標題與訂單資訊
-                    sheet.mergeCells('B2:H4');
-                    const title = sheet.getCell('B2');
+                    sheet.mergeCells('B3:H4');
+                    const title = sheet.getCell('B3');
                     title.value = '下 料 單'; title.font = { size: 24, bold: true };
                     title.alignment = { vertical:'middle', horizontal:'center' };
+                    sheet.getCell('I3').value = '訂單編號:'; sheet.mergeCells('J3:L3'); sheet.getCell('J3').value = header.orderNo;
                     
-                    sheet.getCell('I2').value = '訂單編號:'; 
-                    sheet.mergeCells('J2:L2'); sheet.getCell('J2').value = header.orderNo;
-                    
-                    sheet.getCell('I3').value = '丈量人員:'; 
-                    sheet.mergeCells('J3:L3'); sheet.getCell('J3').value = header.surveyor;
-                    
-                    sheet.getCell('I4').value = '丈量日期:'; 
-                    sheet.mergeCells('J4:L4'); sheet.getCell('J4').value = header.date;
-
-                    // 4. 客戶基本資訊
                     const meta = [
-                        {a:'公    司:', d:header.company},
+                        {a:'公    司:', d:header.company, i:'丈量日期:', j:new Date().toLocaleDateString()},
                         {a:'聯 絡 人:', d:header.contact, g:'電話:', h:header.phone},
                         {a:'案場地址:', d:header.address}
                     ];
@@ -429,10 +377,7 @@
                         else { sheet.mergeCells(`G${r}:L${r}`); }
                         sheet.getRow(r).eachCell(c => c.border = borderAll);
                     });
-                    // 地址列橫跨到底
-                    sheet.mergeCells(`D7:L7`); sheet.getCell('D7').value = header.address;
 
-                    // 5. 橘色樣式區
                     sheet.getRow(9).height = 30;
                     sheet.mergeCells('A9:B9'); sheet.getCell('A9').value = "門框樣式:";
                     sheet.mergeCells('C9:F9'); sheet.getCell('C9').value = header.frameStyle;
@@ -441,7 +386,6 @@
                     ['A9','G9'].forEach(c => sheet.getCell(c).fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FFFDE9D9'} });
                     ['C9','I9'].forEach(c => { sheet.getCell(c).fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FFF4B084'} }; sheet.getCell(c).font = { bold:true, size:14 }; });
 
-                    // 6. 尺寸主表標題
                     const hRow = sheet.getRow(11);
                     hRow.values = ['編號','洞寬','洞高','門寬','門高','牆厚','主體','線板','備註','樣式','門止','底'];
                     hRow.eachCell(c => { c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFF2F2F2'}}; c.border=borderAll; c.alignment={horizontal:'center'}; c.font={bold:true}; });
@@ -449,11 +393,10 @@
                     let cur = 12;
                     measurements.forEach((m) => {
                         const r = sheet.getRow(cur++);
-                        r.values = [m.no, m.w, m.h, m.dw, m.dh, m.t, m.body || m.t, m.trim || 50, m.note, m.style || "房", m.stop || "隱", m.base || ""];
+                        r.values = [m.no, m.w, m.h, m.dw, m.dh, m.t, m.t, 50, m.note, "房", "隱", ""];
                         r.eachCell(c => { c.border=borderAll; c.alignment={horizontal:'center', vertical:'middle'}; if(c.column===9) c.font={color:{argb:'FFFF0000'}, bold:true}; });
                     });
 
-                    // 7. 精密網格標頭
                     const footStart = cur + 1;
                     sheet.mergeCells(`A${footStart}:D${footStart}`); 
                     sheet.getCell(`A${footStart}`).value = "框門注意事項: " + header.precautions;
@@ -462,105 +405,39 @@
                     sheet.getRow(footStart).eachCell(c => { c.font = { color:{argb:'FF0000FF'}, bold:true }; c.border = borderAll; });
 
                     const redR = footStart + 1;
-                    
-                    // 左半部：灰底案場總結
-                    const firstM = measurements[0] || {};
-                    const mw = firstM.w || 0; const mh = firstM.h || 0; const mt = firstM.t || 0;
-                    const summary = `${mw}/${mh}/${mt}/房/隱/地板確認`;
-                    
-                    sheet.mergeCells(`A${redR}:D${redR+1}`); sheet.getCell(`A${redR}`).value = header.address;
-                    sheet.mergeCells(`A${redR+2}:D${redR+3}`); sheet.getCell(`A${redR+2}`).value = summary;
-                    sheet.mergeCells(`A${redR+4}:D${redR+4}`); sheet.getCell(`A${redR+4}`).value = "門下大陸/框可以工廠切好";
-                    
-                    for(let r=redR; r<=redR+4; r++) {
-                        for(let c=1; c<=4; c++) {
-                            const cell = sheet.getCell(r, c);
-                            cell.fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FFE7E6E6'} };
-                            cell.border = borderAll;
-                        }
-                        sheet.getCell(`A${r}`).alignment = { vertical:'middle', horizontal:'left', wrapText: true };
-                        sheet.getCell(`A${r}`).font = { size: 10, color: { argb: 'FF555555' } };
-                    }
-
-                    // 右半部：紅字警示區
-                    sheet.mergeCells(`E${redR}:L${redR+4}`);
+                    sheet.mergeCells(`A${redR}:D${redR+5}`);
+                    sheet.mergeCells(`E${redR}:L${redR+5}`);
                     const redC = sheet.getCell(`E${redR}`);
-                    redC.value = header.redNotice;
-                    redC.font = { color:{argb:'FFFF0000'}, size:20, bold:true };
-                    redC.alignment = { vertical:'middle', horizontal:'center', wrapText:true };
-                    for(let r=redR; r<=redR+4; r++) {
-                        for(let c=5; c<=12; c++) { sheet.getCell(r, c).border = borderAll; }
-                    }
+                    redC.value = header.redNotice; redC.font = { color:{argb:'FFFF0000'}, size:20, bold:true }; redC.alignment = { vertical:'middle', horizontal:'center', wrapText:true };
+                    for(let r=redR; r<=redR+5; r++) for(let c=1; c<=12; c++) sheet.getCell(r, c).border = borderAll;
 
-                    // 右半部：五金網格 4 格資料行
-                    const pR = redR + 5;
+                    const pR = redR + 6;
                     const partsH = ["防撞條", "鉸鏈", "門止", "把手"];
-                    const partsV = [
-                        (header.partCollision||"").split('\n'),
-                        (header.partHinge||"").split('\n'),
-                        (header.partStop||"").split('\n'),
-                        (header.partHandle||"").split('\n')
-                    ];
-
-                    partsH.forEach((p, i) => {
-                        const sCol = i*2 + 5; 
-                        sheet.mergeCells(pR, sCol, pR, sCol+1);
-                        const head = sheet.getCell(pR, sCol);
-                        head.value = p; head.alignment={horizontal:'center'}; head.font={bold:true};
-                    });
-
-                    for(let rowOffset=1; rowOffset<=4; rowOffset++) {
-                        partsV.forEach((lines, i) => {
-                            const sCol = i*2 + 5;
-                            sheet.mergeCells(pR+rowOffset, sCol, pR+rowOffset, sCol+1);
-                            const val = sheet.getCell(pR+rowOffset, sCol);
-                            val.value = lines[rowOffset-1] || "";
-                            val.alignment={horizontal:'center', vertical:'middle'};
-                        });
-                    }
-
-                    // 五金區的框線
-                    for(let r=pR; r<=pR+4; r++) {
-                        for(let c=5; c<=12; c++) { sheet.getCell(r, c).border = borderAll; }
-                    }
-
-                    // 8. 底部簽名
-                    const fin = pR + 5;
-                    sheet.mergeCells(`E${fin}:H${fin}`);
-                    sheet.getCell(`E${fin}`).value = "訂金: " + (header.deposit || "0");
-                    sheet.mergeCells(`I${fin}:L${fin}`);
-                    sheet.getCell(`I${fin}`).value = "審核人簽章: ";
-                    for(let c=5; c<=12; c++) { sheet.getCell(fin, c).border = borderAll; }
+                    const partsV = [(header.partCollision||"").split('\n'), (header.partHinge||"").split('\n'), (header.partStop||"").split('\n'), (header.partHandle||"").split('\n')];
+                    partsH.forEach((p, i) => { sheet.mergeCells(pR, i*3+1, pR, i*3+3); const head = sheet.getCell(pR, i*3+1); head.value = p; head.alignment={horizontal:'center'}; head.font={bold:true}; });
+                    for(let rowO=1; rowO<=3; rowO++) { partsV.forEach((lines, i) => { sheet.mergeCells(pR+rowO, i*3+1, pR+rowO, i*3+3); const val = sheet.getCell(pR+rowO, i*3+1); val.value = lines[rowO-1] || ""; val.alignment={horizontal:'center', vertical:'middle'}; }); }
+                    for(let r=pR; r<=pR+3; r++) for(let c=1; c<=12; c++) sheet.getCell(r, c).border = borderAll;
 
                     const buffer = await workbook.xlsx.writeBuffer();
                     const link = document.createElement("a");
                     link.href = URL.createObjectURL(new Blob([buffer]));
-                    link.download = `歐德專用下料單_${header.orderNo}.xlsx`;
+                    link.download = `智揚下料單_${header.orderNo}.xlsx`;
                     link.click();
-                } catch(e) {
-                    console.error("Excel Generation Error: ", e);
-                    alert("導出失敗，請確認欄位格式");
-                } finally {
-                    setIsLoading(false);
-                }
+                } catch(e) { alert("導出失敗"); } finally { setIsLoading(false); }
             };
 
-            if (!isReady) return <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white italic font-black text-3xl uppercase animate-pulse">系統啟動中...</div>;
+            if (!isReady) return <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white italic font-black text-3xl animate-pulse">丈量尺寸 啟動中...</div>;
 
             return (
                 <div className="min-h-screen flex flex-col pb-20 relative">
-                    {/* 刪除確認視窗 */}
                     {deleteConfirm && (
                         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[100] flex items-center justify-center p-4">
                             <div className="bg-white rounded-[2.5rem] p-10 max-w-sm w-full shadow-2xl">
-                                <div className="bg-red-50 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6">
-                                    <Icon name="alert-triangle" className="w-10 h-10 text-red-500" />
-                                </div>
                                 <h3 className="text-2xl font-black text-slate-800 text-center mb-2">確認要刪除嗎？</h3>
                                 <p className="text-slate-500 font-bold text-center mb-10 leading-relaxed">即將刪除訂單 [{deleteConfirm}]<br/>此動作將永久移除雲端紀錄。</p>
                                 <div className="flex gap-4">
                                     <button onClick={() => setDeleteConfirm(null)} className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-600 py-4 rounded-2xl font-black transition-all">取消</button>
-                                    <button onClick={() => confirmDeleteHistory(deleteConfirm)} className="flex-1 bg-red-500 hover:bg-red-600 text-white py-4 rounded-2xl font-black shadow-lg shadow-red-500/30 transition-all">刪除</button>
+                                    <button onClick={() => confirmDeleteHistory(deleteConfirm)} className="flex-1 bg-red-500 hover:bg-red-600 text-white py-4 rounded-2xl font-black transition-all">刪除</button>
                                 </div>
                             </div>
                         </div>
@@ -581,36 +458,34 @@
                             </div>
                         </div>
                         <div className="flex gap-3">
-                            <button onClick={() => setView(view === 'main' ? 'history' : 'main')} className="bg-slate-800 text-white px-5 py-3 rounded-2xl text-sm font-black flex items-center gap-2 transition-all"><Icon name={view === 'main' ? "list" : "chevron-left"} className="w-5 h-5" /> {view === 'main' ? "紀錄" : "返回"}</button>
-                            <button onClick={handleSync} className="bg-blue-600 text-white px-5 py-3 rounded-2xl text-sm font-black shadow-lg">同步雲端</button>
+                            <button onClick={() => setView(view === 'main' ? 'history' : 'main')} className="bg-slate-800 text-white px-5 py-3 rounded-2xl text-sm font-black flex items-center gap-2 transition-all active:scale-95"><Icon name={view === 'main' ? "list" : "chevron-left"} className="w-5 h-5" /> {view === 'main' ? "紀錄" : "返回"}</button>
+                            <button onClick={handleSync} className="bg-blue-600 text-white px-5 py-3 rounded-2xl text-sm font-black shadow-lg flex items-center gap-2 transition-all active:scale-95">同步雲端</button>
                         </div>
                     </nav>
 
                     {view === "main" ? (
                         <main className="p-4 lg:p-8 max-w-7xl mx-auto w-full space-y-8">
-                            {/* 案場基礎 */}
-                            <div className="card p-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-8">
+                            <div className="card p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
                                 <div className="space-y-2">
-                                    <label className="text-xs font-black text-slate-400 uppercase">訂單編號</label>
+                                    <label className="text-xs font-black text-slate-400 uppercase tracking-widest">訂單編號</label>
                                     <input value={header.orderNo} onChange={e=>setHeader({...header, orderNo: e.target.value})} className="w-full border-b-2 p-2 text-2xl font-black text-blue-600 outline-none" />
                                 </div>
                                 <div className="lg:col-span-2 space-y-2">
-                                    <label className="text-xs font-black text-slate-400 uppercase">案場地址 (可用語音輸入)</label>
+                                    <label className="text-xs font-black text-slate-400 uppercase tracking-widest">案場地址</label>
                                     <input value={header.address} onChange={e=>setHeader({...header, address: e.target.value})} className="w-full border-b-2 p-2 text-2xl font-bold outline-none" />
                                 </div>
                                 <div className="space-y-2 text-center">
-                                    <label className="text-xs font-black text-slate-400 uppercase text-red-500">影片同步</label>
-                                    <button onClick={()=>fileInputRef.current.click()} className="w-full bg-slate-50 py-3 rounded-2xl text-sm font-black border flex items-center justify-center gap-2 transition-all">
+                                    <label className="text-xs font-black text-slate-400 uppercase text-red-500 flex items-center justify-center gap-2 tracking-widest"><Icon name="video" className="w-4 h-4" /> 現場錄影</label>
+                                    <button onClick={()=>fileInputRef.current.click()} className="w-full bg-slate-50 hover:bg-slate-100 py-3 rounded-2xl text-sm font-black border transition-all flex items-center justify-center gap-2">
                                         {uploadProgress > 0 && uploadProgress < 100 ? <div className="w-5 h-5 border-3 border-blue-500 border-t-transparent rounded-full animate-spin"></div> : 
-                                         header.videoLink ? <Icon name="check-circle-2" className="w-6 h-6 text-emerald-500"/> : <Icon name="upload" className="w-5 h-5"/>}
-                                        {uploadProgress > 0 && uploadProgress < 100 ? `${Math.round(uploadProgress)}%` : header.videoLink ? "影片已同步" : "上傳影片"}
+                                         header.videoLink ? <Icon name="check-circle-2" className="w-5 h-5 text-emerald-500" /> : <Icon name="upload" className="w-5 h-5" />}
+                                        {uploadProgress > 0 && uploadProgress < 100 ? `${Math.round(uploadProgress)}%` : header.videoLink ? "已同步" : "上傳影片"}
                                     </button>
                                     <input type="file" ref={fileInputRef} hidden accept="video/*" onChange={handleVideoSelect} />
                                 </div>
-                                <button onClick={exportExcel} className="bg-emerald-600 text-white py-3 rounded-xl text-sm font-black shadow-lg mt-auto active:scale-95 transition-all">導出 Excel</button>
+                                <button onClick={exportExcel} className="bg-emerald-600 text-white py-3 rounded-xl text-sm font-black shadow-lg mt-auto transition-all active:scale-95">導出 Excel</button>
                             </div>
 
-                            {/* 影片預覽 */}
                             {videoUrl && (
                                 <div className="bg-black rounded-[2.5rem] overflow-hidden shadow-2xl aspect-video max-w-3xl mx-auto border-8 border-white relative group">
                                     <video src={videoUrl} controls className="w-full h-full object-cover"></video>
@@ -629,39 +504,37 @@
                                 </div>
                             </div>
 
-                            {/* 智慧語音控制區 */}
                             <div className="bg-slate-900 rounded-[3.5rem] p-12 text-center relative overflow-hidden shadow-2xl border-8 border-white">
                                 {isLoading && <div className="absolute inset-0 bg-slate-900/95 z-30 flex flex-col items-center justify-center"><Icon name="loader-2" className="animate-spin text-blue-500 w-20 h-20 mb-4" /><p className="text-blue-400 font-black tracking-widest text-lg animate-pulse uppercase">AI 智慧解析中...</p></div>}
                                 <button onClick={toggleRecording} className={`w-40 h-40 rounded-full flex items-center justify-center mx-auto transition-all border-[14px] border-slate-800 shadow-2xl ${isRecording ? 'record-pulse' : 'bg-white hover:scale-105'}`}>
                                     {isRecording ? <div className="w-12 h-12 bg-white rounded-xl"></div> : <Icon name="mic" className="w-20 h-20 text-slate-900" />}
                                 </button>
                                 {transcript && <p className="mt-8 text-white/40 text-sm font-bold tracking-widest italic leading-relaxed px-6">「 {transcript} 」</p>}
-                                <p className="mt-4 text-slate-500 text-xs font-black uppercase">可同時報地址、備註、零件、尺寸</p>
+                                <p className="mt-4 text-slate-500 text-xs font-black uppercase tracking-widest">可同時報地址、零件、尺寸、備註</p>
                             </div>
 
-                            {/* 丈量明細 */}
                             <div className="card overflow-hidden">
                                 <div className="p-6 bg-slate-50 border-b flex justify-between items-center bg-slate-50/80">
-                                    <h3 className="section-title italic">Zhiyang Order List</h3>
-                                    <button onClick={() => setMeasurements([...measurements, { id: Date.now(), no: (measurements.length+1)+".", w:0, h:0, dw:0, dh:0, t:0, body:0, trim:50, note:"" }])} className="bg-indigo-600 text-white px-6 py-3 rounded-2xl text-sm font-black shadow-lg active:scale-95 transition-all">+ 手動新增</button>
+                                    <h3 className="section-title italic">尺寸明細 ({measurements.length} 樘)</h3>
+                                    <button onClick={() => setMeasurements([...measurements, { id: Date.now(), no: (measurements.length+1)+".", w:0, h:0, dw:0, dh:0, t:0, note:"" }])} className="bg-indigo-600 text-white px-6 py-3 rounded-2xl text-sm font-black active:scale-95 transition-all">+ 手動新增</button>
                                 </div>
                                 <div className="overflow-x-auto virtual-list no-scrollbar">
                                     <table className="w-full text-left min-w-[1100px] border-separate border-spacing-0">
                                         <thead className="bg-slate-50 text-sm text-slate-400 font-black uppercase sticky top-0 z-20 shadow-sm border-b">
-                                            <tr><th className="px-8 py-6">編號</th><th className="px-4 py-6 text-blue-700">洞寬</th><th className="px-4 py-6 text-blue-700">洞高</th><th className="px-4 py-6 text-emerald-600 border-x">門寬</th><th className="px-4 py-6 text-emerald-600 border-r">門高</th><th className="px-4 py-6 text-center">牆厚</th><th className="px-8 py-6">備註 / 樣式</th><th className="px-4 py-6 w-24"></th></tr>
+                                            <tr><th className="px-8 py-6">編號</th><th className="px-4 py-6 text-blue-700">洞寬</th><th className="px-4 py-6 text-blue-700">洞高</th><th className="px-4 py-6 text-emerald-600 border-x">門寬</th><th className="px-4 py-6 text-emerald-600 border-r">門高</th><th className="px-4 py-6 text-center">牆厚</th><th className="px-8 py-6">備註 / 樣式</th><th className="px-4 py-6"></th></tr>
                                         </thead>
                                         <tbody className="divide-y divide-slate-100">
                                             {measurements.map(m => (
-                                                <tr key={m.id} className="hover:bg-blue-50/20 group transition-all">
+                                                <tr key={m.id} className="hover:bg-blue-50/20 group">
                                                     <td className="px-8 py-6 font-bold text-slate-400 text-xl italic">{m.no}</td>
-                                                    <td className="px-4 py-6"><input type="number" value={m.w} onChange={e=>handleUpdateRow(m.id, 'w', e.target.value)} className="w-full bg-transparent border-none p-0 text-2xl font-black text-blue-800 focus:ring-0" /></td>
-                                                    <td className="px-4 py-6"><input type="number" value={m.h} onChange={e=>handleUpdateRow(m.id, 'h', e.target.value)} className="w-full bg-transparent border-none p-0 text-2xl font-black text-blue-800 focus:ring-0" /></td>
+                                                    <td className="px-4 py-6"><input type="number" value={m.w} onChange={e=>handleUpdateRow(m.id, 'w', e.target.value)} className="w-full bg-transparent border-none p-0 text-2xl font-black text-blue-800" /></td>
+                                                    <td className="px-4 py-6"><input type="number" value={m.h} onChange={e=>handleUpdateRow(m.id, 'h', e.target.value)} className="w-full bg-transparent border-none p-0 text-2xl font-black text-blue-800" /></td>
                                                     <td className="px-4 py-6 bg-emerald-50/10 font-black text-emerald-600 text-4xl tracking-tighter text-center border-x">{m.dw}</td>
                                                     <td className="px-4 py-6 bg-emerald-50/10 font-black text-emerald-600 text-4xl tracking-tighter text-center border-r">{m.dh}</td>
-                                                    <td className="px-4 py-6"><input type="number" value={m.t} onChange={e=>handleUpdateRow(m.id, 't', e.target.value)} className="w-full bg-transparent border-none p-0 text-2xl font-bold text-center focus:ring-0" /></td>
+                                                    <td className="px-4 py-6"><input type="number" value={m.t} onChange={e=>handleUpdateRow(m.id, 't', e.target.value)} className="w-full bg-transparent border-none p-0 text-xl font-bold text-center" /></td>
                                                     <td className="px-8 py-6 flex flex-col gap-3">
                                                         <div className="flex gap-3"><span className="badge">房間門</span><span className="badge">隱形門止</span></div>
-                                                        <input value={m.note} onChange={e=>handleUpdateRow(m.id, 'note', e.target.value)} className="w-full bg-transparent border-none p-0 text-sm text-slate-500 font-bold italic" placeholder="點此輸入備註..." />
+                                                        <input value={m.note} onChange={e=>handleUpdateRow(m.id, 'note', e.target.value)} className="w-full bg-transparent border-none p-0 text-sm text-slate-500 font-bold italic" placeholder="點此輸入現場狀況..." />
                                                     </td>
                                                     <td className="px-4 py-6 text-center"><button onClick={() => setMeasurements(measurements.filter(x=>x.id!==m.id))} className="text-slate-300 hover:text-red-500 transition-all opacity-0 group-hover:opacity-100"><Icon name="trash-2" className="w-7 h-7" /></button></td>
                                                 </tr>
@@ -672,42 +545,47 @@
                             </div>
 
                             <div className="card p-10 space-y-10">
-                                <h3 className="section-title uppercase tracking-[0.2em]">五金配件與精密備註</h3>
+                                <h3 className="section-title uppercase tracking-widest">五金配件與精密備註</h3>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
                                     <div className="space-y-6">
-                                        <div className="space-y-2"><label className="text-xs font-black text-blue-500 uppercase">框門注意事項</label><textarea rows="2" value={header.precautions} onChange={e=>setHeader({...header, precautions:e.target.value})} className="w-full bg-slate-50 border rounded-2xl p-5 text-xl font-bold resize-none" /></div>
-                                        <div className="space-y-2"><label className="text-xs font-black text-blue-500 uppercase">訂單備註</label><textarea rows="2" value={header.orderRemark} onChange={e=>setHeader({...header, orderRemark:e.target.value})} className="w-full bg-slate-50 border rounded-2xl p-5 text-xl font-bold resize-none" /></div>
+                                        <div className="space-y-2"><label className="text-xs font-black text-blue-500 uppercase tracking-widest">框門注意事項</label><textarea rows="2" value={header.precautions} onChange={e=>setHeader({...header, precautions:e.target.value})} className="w-full bg-slate-50 border rounded-2xl p-5 text-xl font-bold resize-none" /></div>
+                                        <div className="space-y-2"><label className="text-xs font-black text-blue-500 uppercase tracking-widest">訂單備註</label><textarea rows="2" value={header.orderRemark} onChange={e=>setHeader({...header, orderRemark:e.target.value})} className="w-full bg-slate-50 border rounded-2xl p-5 text-xl font-bold resize-none" /></div>
                                     </div>
-                                    <div className="space-y-2"><label className="text-xs font-black text-red-500 italic font-black uppercase">大紅字警示區</label><textarea rows="5" value={header.redNotice} onChange={e=>setHeader({...header, redNotice:e.target.value})} className="w-full bg-red-50/30 border border-red-100 rounded-[2.5rem] p-6 text-red-600 font-black text-4xl text-center resize-none leading-relaxed shadow-inner" /></div>
+                                    <div className="space-y-2"><label className="text-xs font-black text-red-500 italic font-black uppercase tracking-widest">大紅字警示區</label><textarea rows="5" value={header.redNotice} onChange={e=>setHeader({...header, redNotice:e.target.value})} className="w-full bg-red-50/30 border border-red-100 rounded-[2.5rem] p-6 text-red-600 font-black text-4xl text-center resize-none leading-relaxed shadow-inner" /></div>
                                 </div>
                                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-8">
                                     {['partCollision','partHinge','partStop','partHandle'].map((key, i) => (
                                         <div key={key} className="bg-slate-50 p-6 rounded-3xl border border-slate-200 shadow-sm">
-                                            <label className="text-xs font-black text-slate-400 mb-3 block uppercase">{['防撞條','鉸鏈','門止','把手'][i]}</label>
+                                            <label className="text-xs font-black text-slate-400 mb-3 block uppercase tracking-widest">{['防撞條','鉸鏈','門止','把手'][i]}</label>
                                             <textarea rows="4" value={header[key]} onChange={e=>setHeader({...header, [key]:e.target.value})} className="w-full bg-white border rounded-2xl p-4 text-2xl font-black outline-none resize-none text-center leading-loose text-slate-700 shadow-inner" placeholder="換行對應網格" />
                                         </div>
                                     ))}
+                                </div>
+                                <div className="flex justify-end gap-6 items-center pt-10 border-t border-slate-100">
+                                    <label className="text-2xl font-black text-slate-600 uppercase tracking-widest">訂金金額 (Deposit):</label>
+                                    <input type="number" value={header.deposit} onChange={e=>setHeader({...header, deposit: e.target.value})} className="w-48 bg-slate-100 border-none p-5 rounded-2xl text-right font-black text-blue-600 text-4xl shadow-inner" />
                                 </div>
                             </div>
                         </main>
                     ) : (
                         <main className="p-4 lg:p-8 max-w-5xl mx-auto w-full">
                             <div className="card">
-                                <div className="p-8 bg-slate-900 text-white flex justify-between items-center rounded-t-[2.5rem]"><h3 className="font-black italic uppercase text-2xl tracking-widest">存檔歷史紀錄</h3><span className="bg-blue-600 px-4 py-1 rounded-full text-xs font-black">{allCases.length} 案存檔</span></div>
+                                <div className="p-8 bg-slate-900 text-white flex justify-between items-center rounded-t-[2.5rem]"><h3 className="font-black italic uppercase text-2xl tracking-widest">雲端存檔歷史清單</h3><span className="bg-blue-600 px-4 py-1 rounded-full text-xs font-black">{allCases.length} 案存檔</span></div>
                                 <div className="divide-y divide-slate-100">
                                     {allCases.map(c => (
                                         <div key={c.id} className="p-8 hover:bg-slate-50 transition-all flex justify-between items-center cursor-pointer group" onClick={() => loadCase(c)}>
                                             <div className="space-y-1">
                                                 <p className="text-blue-600 font-black text-3xl mb-1 tracking-tighter">{c.orderNo}</p>
-                                                <p className="text-xl font-bold text-slate-500">{c.address}</p>
-                                                <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mt-2">同步時間: {new Date(c.updatedAt).toLocaleString()}</p>
+                                                <p className="text-lg font-bold text-slate-500">{c.address}</p>
+                                                <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">最後更新: {new Date(c.updatedAt).toLocaleString()}</p>
                                             </div>
                                             <div className="flex items-center gap-10">
-                                                <button onClick={(e) => { e.stopPropagation(); setDeleteConfirm(c.orderNo); }} className="p-4 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-2xl transition-all opacity-0 group-hover:opacity-100"><Icon name="trash-2" className="w-10 h-10" /></button>
-                                                <Icon name="chevron-right" className="w-12 h-12 text-slate-200 group-hover:text-blue-500 transition-colors" />
+                                                <button onClick={(e) => { e.stopPropagation(); setDeleteConfirm(c.orderNo); }} className="p-4 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-2xl transition-all opacity-0 group-hover:opacity-100"><Icon name="trash-2" className="w-8 h-8" /></button>
+                                                <Icon name="chevron-right" className="w-10 h-10 text-slate-200 group-hover:text-blue-500 transition-colors" />
                                             </div>
                                         </div>
                                     ))}
+                                    {allCases.length === 0 && <div className="p-32 text-center text-slate-300 font-black uppercase tracking-[0.5em] italic">No History Found</div>}
                                 </div>
                             </div>
                         </main>
