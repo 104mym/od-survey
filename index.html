@@ -184,14 +184,15 @@
                 return () => unsubscribe();
             }, [user, db]);
 
-            // 🚀 AI 解析與「強制入格」邏輯 (升級 JSON Schema 確保欄位對應)
+            // 🚀 AI 解析與「強制入格」邏輯 (加入同音錯字糾正與加速錯誤拋出)
             const parseSpeech = async (text) => {
                 if (!text.trim()) return;
                 setIsLoading(true);
                 
                 const systemPrompt = `你是一位專業丈量秘書。請分析使用者的語音內容，並將其準確分類填入對應的 JSON 欄位。
-若語音中未提到某欄位資訊，該欄位請保持為空字串。
-1. 識別以下資訊並放入 header 物件中：
+【重要】：語音辨識常有「同音錯字」，請聰明糾正。例如：「門指/門子」->「門止」、「被影/備贏」->「貝-WING」、「子木/紫母」->「子母」、「防狀/房狀」->「防撞條」、「考七」->「烤漆」、「門下大陸/大路」->「門下大陸」。
+即使文字很亂，也請盡力萃取以下資訊：
+1. header 物件：
    - address: 案場地址
    - partHandle: 把手款式 (例：黑色、貝-WING)
    - partCollision: 防撞條款式 (例：白色)
@@ -200,13 +201,12 @@
    - redNotice: 大紅字警示區內容 (例：門下大陸)
    - precautions: 框門注意事項
    - orderRemark: 訂單備註
-2. 識別尺寸數據放入 items 陣列（若提及多組尺寸請全部列出）：
-   - no: 門的編號(字串)
+2. items 陣列 (尺寸數據，請確保 w, h, t 皆為純數字，沒有提到的保持 0)：
+   - no: 編號(字串)
    - w: 洞寬 (數字)
    - h: 洞高 (數字)
    - t: 牆厚 (數字)
-   - note: 備註
-注意：尺寸的寬(w)、高(h)、厚(t)必須是純數字。`;
+   - note: 備註`;
 
                 const fetchWithRetry = async (retries = 0) => {
                     try {
@@ -221,32 +221,8 @@
                                     responseSchema: {
                                         type: "OBJECT",
                                         properties: {
-                                            header: {
-                                                type: "OBJECT",
-                                                properties: {
-                                                    address: { type: "STRING" },
-                                                    partHandle: { type: "STRING" },
-                                                    partCollision: { type: "STRING" },
-                                                    partStop: { type: "STRING" },
-                                                    partHinge: { type: "STRING" },
-                                                    redNotice: { type: "STRING" },
-                                                    precautions: { type: "STRING" },
-                                                    orderRemark: { type: "STRING" }
-                                                }
-                                            },
-                                            items: {
-                                                type: "ARRAY",
-                                                items: {
-                                                    type: "OBJECT",
-                                                    properties: {
-                                                        no: { type: "STRING" },
-                                                        w: { type: "NUMBER" },
-                                                        h: { type: "NUMBER" },
-                                                        t: { type: "NUMBER" },
-                                                        note: { type: "STRING" }
-                                                    }
-                                                }
-                                            }
+                                            header: { type: "OBJECT", properties: { address: { type: "STRING" }, partHandle: { type: "STRING" }, partCollision: { type: "STRING" }, partStop: { type: "STRING" }, partHinge: { type: "STRING" }, redNotice: { type: "STRING" }, precautions: { type: "STRING" }, orderRemark: { type: "STRING" } } },
+                                            items: { type: "ARRAY", items: { type: "OBJECT", properties: { no: { type: "STRING" }, w: { type: "NUMBER" }, h: { type: "NUMBER" }, t: { type: "NUMBER" }, note: { type: "STRING" } } } }
                                         }
                                     }
                                 }
@@ -264,20 +240,19 @@
                 };
 
                 try {
+                    // API 請求 (具備重試機制)
                     const data = await fetchWithRetry();
+                    
+                    // 解析 JSON (移出重試區塊，失敗就立刻結束，不會卡住)
                     let rawText = data.candidates[0].content.parts[0].text;
-                    // 確保清除可能的 Markdown 標籤
                     rawText = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
                     const result = JSON.parse(rawText);
                     
                     let updatedHeader = { ...header };
                     if (result.header) {
                         const newHeaderData = {};
-                        // 只覆寫有解析出內容的欄位，保留原本已存在但不打算修改的欄位
                         for (const key in result.header) {
-                            if (result.header[key]) {
-                                newHeaderData[key] = result.header[key];
-                            }
+                            if (result.header[key]) newHeaderData[key] = result.header[key];
                         }
                         updatedHeader = { ...header, ...newHeaderData };
                         setHeader(updatedHeader);
@@ -296,16 +271,12 @@
                         setMeasurements(updatedItems);
                     }
                     
-                    // 同時存檔更新的資料
                     syncToCloud(updatedItems, updatedHeader);
-                    
-                    // ✅ 只有在解析與帶入成功後，才清空逐字稿
                     transcriptAccumulator.current = ""; 
                     setTranscript(""); 
 
                 } catch (e) { 
-                    // 失敗時不清空逐字稿，方便用戶點擊重試
-                    alert("AI 解析失敗，請檢查網路或重試。"); 
+                    alert("AI 解析失敗，請檢查語音內容是否過於混亂或稍後重試。"); 
                     console.error("AI Parser Error:", e);
                 } finally { 
                     setIsLoading(false); 
@@ -316,7 +287,6 @@
                 if (isRecording) {
                     recognitionRef.current.stop();
                     setIsRecording(false);
-                    // 🚨 根據您的需求，已移除自動解析。現在停止錄音後，需手動點擊按鈕帶入
                 } else {
                     transcriptAccumulator.current = "";
                     setTranscript("");
@@ -329,37 +299,15 @@
                 const file = e.target.files[0];
                 if (!file) return;
 
-                // 🌟 核心防呆解法：立即顯示「本地預覽」，不需等待雲端審核即可觀看！
+                // 🌟 徹底解決 Storage 權限問題：只使用本地端預覽，不再上傳至被封鎖的伺服器空間
                 const localUrl = URL.createObjectURL(file);
                 const localHeader = {...header, videoLink: localUrl};
                 setHeader(localHeader);
+                syncToCloud(null, localHeader);
+                alert("✅ 影片已成功載入本地預覽！(請注意：重新整理後影片需重新選取)");
                 
-                if (!storage || !user) return;
-                
-                const sRef = window.FB.ref(storage, `artifacts/${canvasAppId}/users/${user.uid}/videos/${Date.now()}_${file.name}`);
-                const task = window.FB.uploadBytesResumable(sRef, file);
-                
-                task.on('state_changed', 
-                    (s) => setUploadProgress((s.bytesTransferred / s.totalBytes) * 100),
-                    (err) => {
-                        console.error("Video Upload Error:", err);
-                        // 處理 Canvas 環境 Storage 權限阻擋問題
-                        if (err.code === 'storage/unauthorized') {
-                            alert("💡 提示：系統測試環境不支援儲存影片。\n\n影片已為您轉為「本地預覽模式」，現在可以正常播放，但在重新整理頁面後將不會保留。若需永久雲端儲存影片，未來請部署至您的正式網域。");
-                        } else {
-                            alert("影片上傳失敗: " + err.message);
-                        }
-                        setUploadProgress(0);
-                    },
-                    async () => {
-                        const url = await window.FB.getDownloadURL(task.snapshot.ref);
-                        const finalHeader = {...header, videoLink: url};
-                        setHeader(finalHeader);
-                        setUploadProgress(0);
-                        syncToCloud(null, finalHeader);
-                        alert("✅ 影片同步完成");
-                    }
-                );
+                // 移除所有上傳邏輯，確保不再出現 storage/unauthorized 錯誤
+                setUploadProgress(0);
             };
 
             const syncToCloud = async (customItems = null, customHeader = null) => {
@@ -505,14 +453,21 @@
                             )}
 
                             <div className="bg-slate-900 rounded-[3.5rem] p-12 text-center relative overflow-hidden shadow-2xl border-8 border-white">
-                                {isLoading && <div className="absolute inset-0 bg-slate-900/95 z-30 flex flex-col items-center justify-center"><Icon name="loader-2" className="animate-spin text-blue-500 w-20 h-20 mb-4" /><p className="text-blue-400 font-black tracking-widest text-lg animate-pulse uppercase italic">AI 正在自動帶入數據...</p></div>}
+                                {isLoading && <div className="absolute inset-0 bg-slate-900/95 z-30 flex flex-col items-center justify-center"><Icon name="loader-2" className="animate-spin text-blue-500 w-20 h-20 mb-4" /><p className="text-blue-400 font-black tracking-widest text-lg animate-pulse uppercase italic">AI 正在快速解析數據...</p></div>}
                                 <button onClick={toggleRecording} className={`w-40 h-40 rounded-full flex items-center justify-center mx-auto transition-all border-[14px] border-slate-800 shadow-2xl ${isRecording ? 'record-pulse' : 'bg-white hover:scale-105'}`}>
                                     {isRecording ? <div className="w-12 h-12 bg-white rounded-xl"></div> : <Icon name="mic" className="w-20 h-20 text-slate-900" />}
                                 </button>
                                 
-                                {transcript && (
+                                {transcript !== "" && (
                                     <div className="mt-8 space-y-6">
-                                        <p className="text-white/80 text-sm font-bold italic leading-relaxed px-6 break-words">「 {transcript} 」</p>
+                                        <div className="bg-slate-800/50 p-4 rounded-2xl border border-slate-700 relative">
+                                            <label className="absolute -top-3 left-4 bg-slate-900 text-blue-400 text-[10px] font-black px-2 uppercase tracking-widest">語音逐字稿 (可手動修改錯字)</label>
+                                            <textarea 
+                                                value={transcript} 
+                                                onChange={(e) => { setTranscript(e.target.value); transcriptAccumulator.current = e.target.value; }}
+                                                className="w-full bg-transparent text-white/90 text-sm font-bold italic leading-relaxed focus:outline-none resize-none min-h-[80px]"
+                                            />
+                                        </div>
                                         
                                         {!isRecording && (
                                             <button 
