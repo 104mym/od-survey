@@ -52,9 +52,9 @@
             return <span ref={ref} className="inline-flex items-center justify-center" />;
         };
 
-        // 🚀 版本號：v1.1.2 (修正 404 Model Not Found 網址路徑問題)
-        const version = "v1.1.2";
-        // 🚀 核心：您的 Gemini API Key
+        // 🚀 版本號：v1.1.4 (精準修復 CORS 阻擋與 v1beta 格式問題)
+        const version = "v1.1.4";
+        // 🚀 您的 API 金鑰
         const apiKey = "AIzaSyCBBjJwbHHvuTDvgJbyUZzHOYyE5Owa5bg"; 
 
         const App = () => {
@@ -145,7 +145,7 @@
             const parseSpeech = async (text) => {
                 if (!text.trim()) return;
                 if (!apiKey || apiKey.length < 10) {
-                    setAlertMsg({ title: "金鑰錯誤", body: "偵測到 API Key 長度異常，請確認程式碼第 54 行已正確填寫。", isError: true });
+                    setAlertMsg({ title: "金鑰錯誤", body: "偵測到 API Key 無效，請確認程式碼已正確更新。", isError: true });
                     return;
                 }
                 setIsLoading(true);
@@ -153,39 +153,51 @@
 糾正錯字：門止(門子)、貝-WING(備贏)、子母(紫母)、防撞條(防狀)。
 欄位：header(address, partHandle, partCollision, partStop, partHinge, redNotice, precautions, orderRemark), items(no, w, h, t, note)。`;
 
-                try {
-                    // 🛠️ 核心修正：改用 v1 正式版 URL，解決 v1beta 模型 404 問題
-                    const url = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
-                    const resp = await fetch(url, {
-                        method: 'POST',
-                        headers: { 
-                            'Content-Type': 'application/json',
-                            'x-goog-api-key': apiKey 
-                        },
-                        body: JSON.stringify({
-                            contents: [{ parts: [{ text: `語音內容：${text}` }] }],
-                            systemInstruction: { parts: [{ text: systemPrompt }] },
-                            generationConfig: { 
-                                responseMimeType: "application/json",
-                                responseSchema: {
-                                    type: "OBJECT",
-                                    properties: {
-                                        header: { type: "OBJECT", properties: { address: { type: "STRING" }, partHandle: { type: "STRING" }, partCollision: { type: "STRING" }, partStop: { type: "STRING" }, partHinge: { type: "STRING" }, redNotice: { type: "STRING" }, precautions: { type: "STRING" }, orderRemark: { type: "STRING" } } },
-                                        items: { type: "ARRAY", items: { type: "OBJECT", properties: { no: { type: "STRING" }, w: { type: "NUMBER" }, h: { type: "NUMBER" }, t: { type: "NUMBER" }, note: { type: "STRING" } } } }
+                const fetchWithRetry = async (retries = 0) => {
+                    try {
+                        // 🛠️ 回歸 v1beta (支援 JSON Schema) 並移除會被手機阻擋的自訂標頭，純淨傳送金鑰
+                        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey.trim()}`;
+                        const resp = await fetch(url, {
+                            method: 'POST',
+                            headers: { 
+                                'Content-Type': 'application/json'
+                                // 🛑 已移除 x-goog-api-key，避免手機瀏覽器發生 CORS Preflight 錯誤
+                            },
+                            body: JSON.stringify({
+                                contents: [{ parts: [{ text: `語音內容：${text}` }] }],
+                                systemInstruction: { parts: [{ text: systemPrompt }] },
+                                generationConfig: { 
+                                    responseMimeType: "application/json",
+                                    responseSchema: {
+                                        type: "OBJECT",
+                                        properties: {
+                                            header: { type: "OBJECT", properties: { address: { type: "STRING" }, partHandle: { type: "STRING" }, partCollision: { type: "STRING" }, partStop: { type: "STRING" }, partHinge: { type: "STRING" }, redNotice: { type: "STRING" }, precautions: { type: "STRING" }, orderRemark: { type: "STRING" } } },
+                                            items: { type: "ARRAY", items: { type: "OBJECT", properties: { no: { type: "STRING" }, w: { type: "NUMBER" }, h: { type: "NUMBER" }, t: { type: "NUMBER" }, note: { type: "STRING" } } } }
+                                        }
                                     }
                                 }
-                            }
-                        })
-                    });
+                            })
+                        });
 
-                    if (!resp.ok) {
-                        const errData = await resp.json();
-                        const msg = errData.error?.message || "未知 API 錯誤";
-                        throw new Error(`Google 連線異常 (狀態 ${resp.status}): ${msg}`);
+                        if (!resp.ok) {
+                            const errData = await resp.json();
+                            const msg = errData.error?.message || "未知 API 錯誤";
+                            throw new Error(`連線被拒絕 (${resp.status}):\n${msg}`);
+                        }
+
+                        return await resp.json();
+                    } catch (err) {
+                        if (err.message.includes("被拒絕") || retries >= 2) throw err;
+                        await new Promise(r => setTimeout(r, 1000));
+                        return fetchWithRetry(retries + 1);
                     }
+                };
 
-                    const data = await resp.json();
+                try {
+                    const data = await fetchWithRetry();
                     const rawText = data.candidates[0].content?.parts?.[0]?.text;
+                    if (!rawText) throw new Error("AI 回傳了無效的格式");
+                    
                     const result = JSON.parse(rawText.trim());
                     
                     let updatedHeader = { ...header };
@@ -208,7 +220,7 @@
                     setTranscript(""); 
                     setAlertMsg({ title: "解析完成", body: "語音數據已成功自動帶入格子！", isError: false });
                 } catch (e) { 
-                    setAlertMsg({ title: "解析失敗", body: e.message + "\n\n💡 請確認您已在 Google AI Studio 啟用 Generative Language API。", isError: true });
+                    setAlertMsg({ title: "解析失敗", body: e.message, isError: true });
                 } finally { setIsLoading(false); }
             };
 
