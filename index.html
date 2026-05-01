@@ -4,59 +4,41 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>智揚下料助手 PRO - 專業版</title>
+    <title>智揚助手 PRO - 正式版</title>
     
-    <!-- 1. 核心套件：確保載入穩定 -->
+    <!-- 核心套件 -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
-    <!-- 2. ExcelJS：負責生成專業美編表格 -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
 
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700;900&display=swap');
         body { font-family: 'Noto Sans TC', sans-serif; background-color: #f1f5f9; -webkit-tap-highlight-color: transparent; }
         .record-pulse { animation: pulse 1.5s infinite; background-color: #ef4444 !important; }
-        @keyframes pulse {
-            0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); transform: scale(1); }
-            70% { box-shadow: 0 0 0 20px rgba(239, 68, 68, 0); transform: scale(1.05); }
-            100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); transform: scale(1); }
-        }
+        @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); } 70% { box-shadow: 0 0 0 20px rgba(239, 68, 68, 0); } 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); } }
         .virtual-list { max-height: 55vh; overflow-y: auto; scrollbar-width: none; }
         .virtual-list::-webkit-scrollbar { display: none; }
-        input:focus { border-color: #2563eb !important; outline: none; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1); }
         .badge { background: #e0f2fe; color: #0369a1; font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: 900; }
     </style>
 </head>
 <body>
     <div id="root">
-        <!-- 如果程式卡住，這個備用讀取畫面會顯示 -->
         <div class="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white">
             <div class="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-            <h2 class="text-xl font-black tracking-widest uppercase italic">Zhiyang Pro 啟動中</h2>
-            <p class="text-slate-500 text-[10px] mt-2">Connecting to Google Cloud...</p>
+            <h2 class="text-xl font-black italic tracking-widest">ZHIYANG PRO LOADING...</h2>
         </div>
     </div>
 
-    <!-- Firebase 初始化腳本 -->
+    <!-- Firebase SDK -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         
-        const firebaseConfig = {
-            apiKey: "AIzaSyBEcCQcuwCh30xDmj3wE-3CM2YffgIxfAk",
-            authDomain: "tao-men.firebaseapp.com",
-            projectId: "tao-men",
-            storageBucket: "tao-men.firebasestorage.app",
-            messagingSenderId: "332609297071",
-            appId: "1:332609297071:web:03593a930475c97b87525a",
-            measurementId: "G-0RHTM7DV4Z"
-        };
-
-        window.FB = { initializeApp, getAuth, signInAnonymously, onAuthStateChanged, getFirestore, doc, setDoc, getDoc, firebaseConfig };
+        window.FB = { initializeApp, getAuth, signInAnonymously, onAuthStateChanged, getFirestore, doc, setDoc, getDoc };
     </script>
 
     <script type="text/babel">
@@ -65,142 +47,144 @@
         const App = () => {
             const [isReady, setIsReady] = useState(false);
             const [db, setDb] = useState(null);
-            const [user, setUser] = useState(null);
             const [measurements, setMeasurements] = useState([]);
-            const [isRecording, setIsRecording] = useState(false);
             const [isLoading, setIsLoading] = useState(false);
+            const [isRecording, setIsRecording] = useState(false);
             const [timer, setTimer] = useState(0);
-            const [videoUrl, setVideoUrl] = useState(null);
-            const [mode, setMode] = useState("Checking");
+            const [mode, setMode] = useState("Local");
             const [searchTerm, setSearchTerm] = useState("");
 
-            const mediaRecorder = useRef(null);
-            const timerRef = useRef(null);
-            const fileInputRef = useRef(null);
-
             const [header, setHeader] = useState({
-                company: "歐德", contact: "王廷羽",
-                address: "桃園市中壢區青商路419號14樓",
-                orderNo: "20260412", phone: "0923390718", surveyor: "教父",
-                date: new Date().toISOString().split('T')[0]
+                orderNo: "20260412", address: "桃園市中壢區青商路419號14樓",
+                contact: "王廷羽", surveyor: "教父", date: new Date().toISOString().split('T')[0]
             });
 
-            // 強制啟動機制：解決卡住的核心
-            useEffect(() => {
-                const forceStart = setTimeout(() => {
-                    if (!isReady) { setIsReady(true); setMode("Local (Emergency)"); }
-                }, 2000);
+            const firebaseConfig = {
+                apiKey: "AIzaSyBEcCQcuwCh30xDmj3wE-3CM2YffgIxfAk",
+                authDomain: "tao-men.firebaseapp.com",
+                projectId: "tao-men",
+                storageBucket: "tao-men.firebasestorage.app",
+                messagingSenderId: "332609297071",
+                appId: "1:332609297071:web:03593a930475c97b87525a"
+            };
 
+            // 1. 強力啟動：不管雲端好壞，1 秒後一定進入主畫面
+            useEffect(() => {
+                const timer = setTimeout(() => setIsReady(true), 1000);
                 const setup = async () => {
                     try {
                         if (window.FB) {
-                            const app = window.FB.initializeApp(window.FB.firebaseConfig);
-                            const auth = window.FB.getAuth(app);
+                            const app = window.FB.initializeApp(firebaseConfig);
                             const firestore = window.FB.getFirestore(app);
                             setDb(firestore);
-
+                            const auth = window.FB.getAuth(app);
                             await window.FB.signInAnonymously(auth);
                             window.FB.onAuthStateChanged(auth, (u) => {
-                                setUser(u); setMode("Cloud"); setIsReady(true);
-                                clearTimeout(forceStart);
-                                if (u && header.orderNo) loadCloud(firestore, header.orderNo);
+                                if (u) { setMode("Cloud"); loadCloud(firestore, header.orderNo); }
                             });
                         }
-                    } catch (e) { setMode("Local"); setIsReady(true); }
+                    } catch (e) { console.log("Cloud unavailable, staying local."); }
                 };
                 setup();
+                return () => clearTimeout(timer);
             }, []);
 
             const loadCloud = async (fdb, oNo) => {
                 if (!fdb || !oNo) return;
-                setIsLoading(true);
                 try {
                     const docRef = window.FB.doc(fdb, 'artifacts', 'od-app', 'public', 'data', 'cases', oNo);
                     const snap = await window.FB.getDoc(docRef);
                     if (snap.exists()) {
-                        const d = snap.data();
-                        setHeader(prev => ({ ...prev, ...d, orderNo: oNo }));
-                        setMeasurements(d.items || []);
+                        setMeasurements(snap.data().items || []);
+                        setHeader(h => ({ ...h, ...snap.data(), orderNo: oNo }));
                     }
-                } catch (e) {} finally { setIsLoading(false); }
+                } catch (e) {}
             };
 
             const handleSync = async () => {
-                if (mode.includes("Local")) return alert("雲端未連接，請確認設定。");
+                if (mode === "Local") return alert("雲端尚未開通，請檢查 Firebase 設定。");
                 setIsLoading(true);
                 try {
                     const docRef = window.FB.doc(db, 'artifacts', 'od-app', 'public', 'data', 'cases', header.orderNo);
                     await window.FB.setDoc(docRef, { ...header, items: measurements, updatedAt: new Date().toISOString() });
-                    alert("Google 雲端同步完成！");
-                } catch (e) { alert("同步失敗"); }
+                    alert("同步成功！");
+                } catch (e) { alert("同步失敗，可能是權限或帳單問題。"); }
                 finally { setIsLoading(false); }
             };
 
-            // 手動新增與更新
-            const addRow = () => {
-                const newRow = {
-                    id: Date.now() + Math.random(),
-                    no: (measurements.length + 1) + ".",
-                    w: 0, h: 0, dw: 0, dh: 0, t: 0, style: "房", note: ""
-                };
-                setMeasurements(prev => [...prev, newRow]);
+            // 手動新增功能
+            const addItem = () => {
+                const newRow = { id: Date.now(), no: (measurements.length + 1) + ".", w: 0, h: 0, dw: 0, dh: 0, t: 0, style: "房", note: "" };
+                setMeasurements([...measurements, newRow]);
             };
 
-            const updateValue = (id, field, val) => {
+            const updateItem = (id, f, v) => {
                 setMeasurements(prev => prev.map(m => {
                     if (m.id === id) {
-                        let updated = { ...m, [field]: val };
-                        if (field === 'w') updated.dw = val ? parseInt(val) - 48 : 0;
-                        if (field === 'h') updated.dh = val ? parseInt(val) - 30 : 0;
-                        return updated;
+                        let u = { ...m, [f]: v };
+                        if (f === 'w') u.dw = v ? parseInt(v) - 48 : 0;
+                        if (f === 'h') u.dh = v ? parseInt(val) - 30 : 0;
+                        return u;
                     }
                     return m;
                 }));
             };
 
-            // 專業 Excel 美編導出 (對齊上傳照片之樣式)
+            // 專業美編 Excel
             const exportExcel = async () => {
-                if (!window.ExcelJS) return alert("引擎加載中...");
-                const workbook = new window.ExcelJS.Workbook();
-                const sheet = workbook.addWorksheet('下料單');
+                if (!window.ExcelJS) return;
+                const wb = new window.ExcelJS.Workbook();
+                const sh = wb.addWorksheet('下料單');
+                sh.columns = [{width:8},{width:10},{width:10},{width:12},{width:12},{width:10},{width:10},{width:10},{width:25},{width:10},{width:10}];
+                
+                sh.mergeCells('A1:H2');
+                const t = sh.getCell('A1'); t.value = '下 料 單';
+                t.font = { size: 20, bold: true, color: { argb: 'FFFFFFFF' } };
+                t.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4F81BD' } };
+                t.alignment = { vertical: 'middle', horizontal: 'center' };
 
-                // 欄位寬度
-                sheet.columns = [
-                    { width: 8 }, { width: 10 }, { width: 10 }, { width: 10 }, 
-                    { width: 10 }, { width: 10 }, { width: 10 }, { width: 10 }, 
-                    { width: 25 }, { width: 10 }, { width: 10 }
-                ];
-
-                // 1. 頂部標題區 (藍色風格)
-                sheet.mergeCells('A1:H2');
-                const title = sheet.getCell('A1');
-                title.value = '下 料 單';
-                title.font = { name:'Microsoft JhengHei', size: 18, bold: true, color: { argb: 'FFFFFFFF' } };
-                title.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4F81BD' } };
-                title.alignment = { vertical: 'middle', horizontal: 'center' };
-
-                sheet.getCell('I1').value = '訂單編號：';
-                sheet.getCell('J1').value = header.orderNo;
-                sheet.getCell('I2').value = '丈量人員：';
-                sheet.getCell('J2').value = header.surveyor;
-
-                // 2. 聯絡資訊區 (格線與合併)
-                const rows = [
-                    ['公    司：', '', '', header.company, '', '', '', '', '丈量日期：', header.date],
-                    ['聯 絡 人：', '', '', header.contact, '', '電話：', header.phone],
-                    ['案場地址：', '', '', header.address]
-                ];
-                rows.forEach((r, idx) => {
-                    const rowNum = 3 + idx;
-                    sheet.getRow(rowNum).values = r;
-                    sheet.mergeCells(`A${rowNum}:C${rowNum}`);
-                    sheet.mergeCells(`D${rowNum}:H${rowNum}`);
+                const hRow = sh.getRow(8);
+                hRow.values = ['編號', '洞寬', '洞高', '門寬(-48)', '門高(-30)', '牆厚', '主體', '線板', '備註', '樣式', '門止'];
+                hRow.eachCell(c => {
+                    c.fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FFEFEFEF'} };
+                    c.font = { bold: true };
+                    c.border = { top:{style:'thin'}, left:{style:'thin'}, bottom:{style:'thin'}, right:{style:'thin'} };
                 });
 
-                // 3. 樣式區 (橘色風格)
-                sheet.mergeCells('A7:C7'); sheet.getCell('A7').value = '門框樣式:';
-                sheet.mergeCells('D7:F7'); sheet.getCell('D7').value = '同門片';
-                sheet.mergeCells('G7:H7'); sheet.getCell('G7').value = '門片樣式:';
-                sheet.mergeCells('I7:K7'); sheet.getCell('I7').value = '平烤正白';
-                
-                ['A7', 'G7'].forEach(c =>
+                measurements.forEach((m, i) => {
+                    const r = sh.getRow(9 + i);
+                    r.values = [m.no, m.w, m.h, m.dw, m.dh, m.t, m.t, 50, m.note, m.style, '隱'];
+                    r.eachCell(c => {
+                        c.border = { top:{style:'thin'}, left:{style:'thin'}, bottom:{style:'thin'}, right:{style:'thin'} };
+                        if (c.column === 9) c.font = { color: { argb: 'FFFF0000' }, bold: true };
+                    });
+                });
+
+                const buffer = await wb.xlsx.writeBuffer();
+                const link = document.createElement("a");
+                link.href = URL.createObjectURL(new Blob([buffer]));
+                link.download = `智揚下料單_${header.orderNo}.xlsx`;
+                link.click();
+            };
+
+            useEffect(() => { if (isReady) setTimeout(() => lucide.createIcons(), 100); }, [measurements, isRecording, isReady]);
+
+            if (!isReady) return null;
+
+            return (
+                <div className="min-h-screen flex flex-col">
+                    <nav className="bg-slate-900 text-white p-4 shadow-xl flex justify-between items-center sticky top-0 z-50">
+                        <div className="flex items-center gap-2">
+                            <div className="bg-blue-600 p-1.5 rounded-lg shadow-lg"><i data-lucide="shield-check" className="w-5 h-5"></i></div>
+                            <div>
+                                <h1 className="text-lg font-black italic tracking-tighter uppercase">智揚助理</h1>
+                                <div className="flex items-center gap-1">
+                                    <div className={`w-1.5 h-1.5 rounded-full ${mode === 'Cloud' ? 'bg-emerald-500' : 'bg-slate-500'}`}></div>
+                                    <span className="text-[7px] font-bold text-slate-400 uppercase">{mode} Mode</span>
+                                </div>
+                            </div>
+                        </div>
+                        <button onClick={handleSync} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl text-xs font-black shadow-lg">同步雲端</button>
+                    </nav>
+
+                    <main className="p-4 l
