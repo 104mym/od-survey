@@ -56,7 +56,7 @@
             return <span ref={ref} className="inline-flex items-center justify-center" />;
         };
 
-        // 🚀 已填入您的 API 金鑰，現在全平台皆可運行
+        // 🚀 使用您提供的 API 金鑰
         const apiKey = "AIzaSyCBBjJwbHHvuTDvgJbyUZzHOYyE5Owa5bg"; 
 
         const App = () => {
@@ -205,7 +205,8 @@
 
                 const fetchWithRetry = async (retries = 0) => {
                     try {
-                        const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+                        // 🛠️ 修正點：將模型名稱改為標準通用的 gemini-1.5-flash，解決 403 模型存取權限問題
+                        const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
@@ -225,12 +226,12 @@
                         });
                         if (!resp.ok) {
                             const errText = await resp.text();
-                            if (resp.status === 403) throw new Error("API 金鑰權限遭拒。請確認 Google AI Studio 內的金鑰是否有效。");
+                            if (resp.status === 403) throw new Error("API 金鑰驗證失敗。請確認您的 Google AI Studio 金鑰是否正確且已啟用 Generative Language API。");
                             throw new Error(`API 請求遭拒 (${resp.status})`);
                         }
                         return await resp.json();
                     } catch (err) {
-                        if (err.message.includes("金鑰") || retries >= 3) throw err;
+                        if (err.message.includes("驗證失敗") || retries >= 3) throw err;
                         await new Promise(r => setTimeout(r, 1000 * Math.pow(2, retries)));
                         return fetchWithRetry(retries + 1);
                     }
