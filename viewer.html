@@ -1,0 +1,131 @@
+html
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>智揚下料單 - 師傅查看器</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700;900&display=swap');
+        body { font-family: 'Noto Sans TC', sans-serif; background-color: #f8fafc; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        window.FB = { initializeApp, getAuth, signInAnonymously, onAuthStateChanged, getFirestore, doc, getDoc };
+    </script>
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+        const App = () => {
+            const [db, setDb] = useState(null);
+            const [searchNo, setSearchNo] = useState("");
+            const [caseData, setCaseData] = useState(null);
+            const [isLoading, setIsLoading] = useState(false);
+
+            useEffect(() => {
+                const init = async () => {
+                    try {
+                        const config = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+                        const app = window.FB.initializeApp(config);
+                        const auth = window.FB.getAuth(app);
+                        setDb(window.FB.getFirestore(app));
+                        await window.FB.signInAnonymously(auth);
+                    } catch (e) { console.error(e); }
+                };
+                init();
+            }, []);
+
+            const handleSearch = async () => {
+                if (!searchNo) return;
+                setIsLoading(true);
+                try {
+                    const aid = typeof __app_id !== 'undefined' ? __app_id : 'od-official-app';
+                    const docRef = window.FB.doc(db, 'artifacts', aid, 'public', 'data', 'cases', searchNo);
+                    const snap = await window.FB.getDoc(docRef);
+                    if (snap.exists()) setCaseData(snap.data());
+                    else alert("找不到訂單");
+                } catch (e) { alert("讀取失敗"); }
+                finally { setIsLoading(false); }
+            };
+
+            useEffect(() => { lucide.createIcons(); }, [caseData]);
+
+            return (
+                <div className="min-h-screen bg-slate-50">
+                    <nav className="bg-slate-900 text-white p-4 shadow-xl flex justify-between items-center">
+                        <h1 className="text-lg font-black italic">Zhiyang <span className="text-emerald-400">Viewer</span></h1>
+                        <span className="text-[10px] font-black text-slate-500 border px-2 py-1 rounded">唯讀</span>
+                    </nav>
+
+                    <main className="p-4 max-w-5xl mx-auto space-y-6">
+                        <div className="bg-white rounded-[2rem] p-8 shadow-sm border">
+                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-3">輸入訂單編號</label>
+                            <div className="flex gap-2">
+                                <input placeholder="例如: 20260412" value={searchNo} onChange={e=>setSearchNo(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleSearch()} className="flex-1 px-5 py-3 bg-slate-50 rounded-2xl text-sm font-black text-indigo-600 outline-none" />
+                                <button onClick={handleSearch} disabled={isLoading} className="bg-slate-900 text-white px-8 py-3 rounded-2xl font-black text-sm">
+                                    {isLoading ? <i data-lucide="loader-2" className="animate-spin"></i> : "查詢"}
+                                </button>
+                            </div>
+                        </div>
+
+                        {caseData && (
+                            <div className="space-y-6">
+                                <div className="bg-white p-8 rounded-[2rem] shadow-sm border grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div className="space-y-4">
+                                        <div><label className="text-[10px] font-black text-slate-400 uppercase">案場地址</label><p className="text-sm font-bold text-slate-700">{caseData.address}</p></div>
+                                        <div><label className="text-[10px] font-black text-slate-400 uppercase">聯絡人</label><p className="text-sm font-bold text-slate-700">{caseData.contact}</p></div>
+                                    </div>
+                                    <div className="bg-slate-50 p-6 rounded-3xl text-right">
+                                        <label className="text-[10px] font-black text-slate-400 uppercase">總樘數</label>
+                                        <p className="text-3xl font-black text-blue-600">{caseData.items?.length || 0}</p>
+                                    </div>
+                                </div>
+
+                                <div className="bg-white rounded-[2rem] border overflow-hidden shadow-sm">
+                                    <table className="w-full text-left min-w-[900px]">
+                                        <thead>
+                                            <tr className="bg-slate-50 text-[10px] text-slate-400 font-black uppercase border-b">
+                                                <th className="px-6 py-4">編號</th>
+                                                <th className="px-4 py-4 text-emerald-600 bg-emerald-50/20">門寬 (-48)</th>
+                                                <th className="px-4 py-4 text-emerald-600 bg-emerald-50/20">門高 (-30)</th>
+                                                <th className="px-4 py-4">牆厚 (T)</th>
+                                                <th className="px-6 py-4">樣式 / 門止 / 備註</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-100">
+                                            {caseData.items?.map((m, i) => (
+                                                <tr key={i} className="hover:bg-slate-50">
+                                                    <td className="px-6 py-4 font-black text-slate-400 text-xs">{m.no}</td>
+                                                    <td className="px-4 py-4 font-black text-emerald-600 text-lg">{m.dw}</td>
+                                                    <td className="px-4 py-4 font-black text-emerald-600 text-lg">{m.dh}</td>
+                                                    <td className="px-4 py-4 font-bold text-slate-700">{m.t}</td>
+                                                    <td className="px-6 py-4">
+                                                        <div className="flex gap-2"><span className="bg-blue-50 text-blue-700 px-2 py-0.5 rounded text-[10px] font-black uppercase">{m.style}</span><span className="bg-slate-100 text-slate-500 px-2 py-0.5 rounded text-[10px] font-black uppercase">{m.stop}</span></div>
+                                                        <p className="text-xs text-slate-400 italic mt-1">{m.note || "無備註"}</p>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        )}
+                    </main>
+                </div>
+            );
+        };
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
+
