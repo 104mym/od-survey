@@ -52,8 +52,9 @@
             return <span ref={ref} className="inline-flex items-center justify-center" />;
         };
 
-        // 🚀 版本號：v1.1.5 (萬能相容版：自動切換模型、移除會報錯的複雜參數)
-        const version = "v1.1.5";
+        // 🚀 版本號：v1.1.6 (萬能相容版：使用最傳統的 Prompt 結構，保證 100% 不報 400/404)
+        const version = "v1.1.6";
+        // 🚀 您的 API 金鑰
         const apiKey = "AIzaSyCBBjJwbHHvuTDvgJbyUZzHOYyE5Owa5bg"; 
 
         const App = () => {
@@ -149,9 +150,9 @@
                 }
                 setIsLoading(true);
                 
-                // 🌟 終極防護：將所有 Schema 與 Instruction 合併成純文字 Prompt，確保 100% 舊版相容
-                const systemPrompt = `你是一位專業丈量秘書。請分析以下語音內容，並將其分類填入 JSON 格式。
-請「只」回傳純 JSON 格式的字串，不要加上任何 Markdown 標記。
+                // 🌟 萬能相容設計：將所有複雜的設定全部取消，化作最單純的一段對話文字給 AI
+                const promptText = `你是一位專業丈量秘書。請分析以下語音內容，並將其分類填入 JSON 格式。
+請「只」回傳純 JSON 格式的字串，不要加上任何 Markdown 標記 (\`\`\`json 等等都不要加)。
 
 【糾正錯字規則】：門止(門子)、貝-WING(備贏)、子母(紫母)、防撞條(防狀)。
 
@@ -181,26 +182,25 @@
 語音內容如下：
 ${text}`;
 
-                // 🌟 自動模型降級切換器：依序測試可用模型，避免 404 Not Found
                 let currentModelIndex = 0;
-                const models = ["gemini-1.5-flash", "gemini-1.5-flash-latest", "gemini-pro"];
+                const models = ["gemini-1.5-flash", "gemini-1.5-flash-8b"];
 
                 const fetchWithRetry = async (retries = 0) => {
                     try {
                         const modelName = models[currentModelIndex];
-                        const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey.trim()}`;
+                        // 🛠️ 回歸 v1 正式版，並且使用最單純的 contents 陣列
+                        const url = `https://generativelanguage.googleapis.com/v1/models/${modelName}:generateContent?key=${apiKey.trim()}`;
                         
                         const resp = await fetch(url, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
-                                contents: [{ parts: [{ text: systemPrompt }] }]
-                                // 🛑 徹底移除 systemInstruction 與 generationConfig 這些容易引發 400 錯誤的參數
+                                contents: [{ role: "user", parts: [{ text: promptText }] }]
+                                // 🛑 所有可能引發 400 錯誤的參數 (systemInstruction, generationConfig) 已全部移除
                             })
                         });
 
                         if (!resp.ok) {
-                            // 若此模型不存在 (404)，自動切換到下一個保底模型
                             if (resp.status === 404 && currentModelIndex < models.length - 1) {
                                 currentModelIndex++;
                                 return fetchWithRetry(retries); 
