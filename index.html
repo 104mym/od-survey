@@ -28,11 +28,11 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, getDoc, deleteDoc, collection, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { getStorage, ref, uploadBytesResumable, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-storage.js";
         
-        window.FB = { initializeApp, getAuth, signInAnonymously, onAuthStateChanged, getFirestore, doc, setDoc, getDoc, deleteDoc, collection, onSnapshot, getStorage, ref, uploadBytesResumable, getDownloadURL };
+        window.FB = { initializeApp, getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, getFirestore, doc, setDoc, getDoc, deleteDoc, collection, onSnapshot, getStorage, ref, uploadBytesResumable, getDownloadURL };
     </script>
 
     <script type="text/babel">
@@ -56,7 +56,7 @@
             return <span ref={ref} className="inline-flex items-center justify-center" />;
         };
 
-        const apiKey = ""; 
+        const apiKey = ""; // API Key 會由系統執行環境自動注入，請保持空字串
 
         const App = () => {
             const [view, setView] = useState("main"); 
@@ -70,9 +70,7 @@
             const [isRecording, setIsRecording] = useState(false);
             const [transcript, setTranscript] = useState("");
             const [mode, setMode] = useState("Cloud");
-            const [videoUrl, setVideoUrl] = useState(null); 
             const [uploadProgress, setUploadProgress] = useState(0); 
-            const [deleteConfirm, setDeleteConfirm] = useState(null);
             const [logoImgBase64, setLogoImgBase64] = useState("");
             const [timer, setTimer] = useState(0);
 
@@ -80,7 +78,7 @@
             const fileInputRef = useRef(null);
             const transcriptAccumulator = useRef(""); 
 
-            const FIREBASE_APP_ID = 'od-survey-system';
+            const canvasAppId = typeof window.__app_id !== 'undefined' ? window.__app_id : 'od-survey-system';
 
             const [header, setHeader] = useState({
                 orderNo: new Date().toISOString().slice(0,10).replace(/-/g, ""),
@@ -96,7 +94,7 @@
             useEffect(() => {
                 const initFirebase = async () => {
                     try {
-                        const config = {
+                        const fallbackConfig = {
                             apiKey: "AIzaSyBEcCQcuwCh30xDmj3wE-3CM2YffgIxfAk",
                             authDomain: "tao-men.firebaseapp.com",
                             projectId: "tao-men",
@@ -104,7 +102,9 @@
                             messagingSenderId: "332609297071",
                             appId: "1:332609297071:web:03593a930475c97b87525a"
                         };
-                        const app = window.FB.initializeApp(config);
+                        const firebaseConfig = typeof window.__firebase_config !== 'undefined' ? JSON.parse(window.__firebase_config) : fallbackConfig;
+                        
+                        const app = window.FB.initializeApp(firebaseConfig);
                         const firestore = window.FB.getFirestore(app);
                         const st = window.FB.getStorage(app);
                         const auth = window.FB.getAuth(app);
@@ -112,15 +112,36 @@
                         setDb(firestore);
                         setStorage(st);
 
-                        await window.FB.signInAnonymously(auth);
+                        const initAuth = async () => {
+                            if (typeof window.__initial_auth_token !== 'undefined' && window.__initial_auth_token) {
+                                await window.FB.signInWithCustomToken(auth, window.__initial_auth_token);
+                            } else {
+                                await window.FB.signInAnonymously(auth);
+                            }
+                        };
+                        await initAuth();
+
                         window.FB.onAuthStateChanged(auth, (u) => {
                             setUser(u);
-                            if (u) fetchHistory(firestore);
                         });
                         setIsReady(true);
-                    } catch (e) { setIsReady(true); setMode("Local"); }
+                    } catch (e) { 
+                        console.error(e);
+                        setIsReady(true); 
+                        setMode("Local"); 
+                    }
                 };
-                initFirebase();
+
+                // 等待 Firebase 模組載入完成
+                const checkAndInit = () => {
+                    if (window.FB && window.FB.initializeApp) {
+                        initFirebase();
+                    } else {
+                        setTimeout(checkAndInit, 100);
+                    }
+                };
+                checkAndInit();
+
                 getLogoBase64().then(url => setLogoImgBase64(url));
 
                 if ('webkitSpeechRecognition' in window) {
@@ -134,7 +155,9 @@
                         for (let i = e.resultIndex; i < e.results.length; ++i) {
                             if (e.results[i].isFinal) finalStr += e.results[i][0].transcript;
                         }
-                        if (finalStr) transcriptAccumulator.current += finalStr + " ";
+                        if (finalStr) {
+                            transcriptAccumulator.current += finalStr + " ";
+                        }
                         setTranscript(transcriptAccumulator.current);
                     };
                     recognitionRef.current.onerror = () => setIsRecording(false);
@@ -148,24 +171,42 @@
                 return () => clearInterval(interval);
             }, [isRecording]);
 
-            const fetchHistory = (fdb) => {
-                const colRef = window.FB.collection(fdb, 'artifacts', FIREBASE_APP_ID, 'public', 'data', 'cases');
-                window.FB.onSnapshot(colRef, (snap) => {
+            // 讀取歷史資料的監聽器
+            useEffect(() => {
+                if (!user || !db) return;
+                const colRef = window.FB.collection(db, 'artifacts', canvasAppId, 'public', 'data', 'cases');
+                const unsubscribe = window.FB.onSnapshot(colRef, (snap) => {
                     const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                     setAllCases(list.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)));
+                }, (error) => {
+                    console.error("Fetch history error:", error);
                 });
-            };
+                return () => unsubscribe();
+            }, [user, db]);
 
-            // 🚀 AI 解析與「強制入格」邏輯
+            // 🚀 AI 解析與「強制入格」邏輯 (升級 JSON Schema 確保欄位對應)
             const parseSpeech = async (text) => {
                 if (!text.trim()) return;
                 setIsLoading(true);
                 
-                const systemPrompt = `你是一位專業丈量秘書。請將內容轉為 JSON 格式。
-                1. 識別：address(地址), partHandle(把手), partCollision(防撞條), partStop(門止), partHinge(鉸鏈), redNotice(紅字), precautions(注意)。
-                2. 尺寸：items 陣列，包含 no(編號), w(寬), h(高), t(厚), note(備註)。
-                3. 自動計算：門寬=w-48, 門高=h-30。
-                格式範例：{"header":{"address":"...","partHandle":"..."},"items":[{"no":"1.","w":898,"h":2190,"t":125}]}`;
+                const systemPrompt = `你是一位專業丈量秘書。請分析使用者的語音內容，並將其準確分類填入對應的 JSON 欄位。
+若語音中未提到某欄位資訊，該欄位請保持為空字串。
+1. 識別以下資訊並放入 header 物件中：
+   - address: 案場地址
+   - partHandle: 把手款式 (例：黑色、貝-WING)
+   - partCollision: 防撞條款式 (例：白色)
+   - partStop: 門止款式 (例：銀色隱形)
+   - partHinge: 鉸鏈款式 (例：銀色子母)
+   - redNotice: 大紅字警示區內容 (例：門下大陸)
+   - precautions: 框門注意事項
+   - orderRemark: 訂單備註
+2. 識別尺寸數據放入 items 陣列（若提及多組尺寸請全部列出）：
+   - no: 門的編號(字串)
+   - w: 洞寬 (數字)
+   - h: 洞高 (數字)
+   - t: 牆厚 (數字)
+   - note: 備註
+注意：尺寸的寬(w)、高(h)、厚(t)必須是純數字。`;
 
                 const fetchWithRetry = async (retries = 0) => {
                     try {
@@ -175,13 +216,46 @@
                             body: JSON.stringify({
                                 contents: [{ parts: [{ text: `語音內容：${text}` }] }],
                                 systemInstruction: { parts: [{ text: systemPrompt }] },
-                                generationConfig: { responseMimeType: "application/json" }
+                                generationConfig: { 
+                                    responseMimeType: "application/json",
+                                    responseSchema: {
+                                        type: "OBJECT",
+                                        properties: {
+                                            header: {
+                                                type: "OBJECT",
+                                                properties: {
+                                                    address: { type: "STRING" },
+                                                    partHandle: { type: "STRING" },
+                                                    partCollision: { type: "STRING" },
+                                                    partStop: { type: "STRING" },
+                                                    partHinge: { type: "STRING" },
+                                                    redNotice: { type: "STRING" },
+                                                    precautions: { type: "STRING" },
+                                                    orderRemark: { type: "STRING" }
+                                                }
+                                            },
+                                            items: {
+                                                type: "ARRAY",
+                                                items: {
+                                                    type: "OBJECT",
+                                                    properties: {
+                                                        no: { type: "STRING" },
+                                                        w: { type: "NUMBER" },
+                                                        h: { type: "NUMBER" },
+                                                        t: { type: "NUMBER" },
+                                                        note: { type: "STRING" }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             })
                         });
                         if (!resp.ok) throw new Error("API_FAIL");
                         return await resp.json();
                     } catch (err) {
-                        if (retries < 3) {
+                        if (retries < 5) {
                             await new Promise(r => setTimeout(r, 1000 * Math.pow(2, retries)));
                             return fetchWithRetry(retries + 1);
                         }
@@ -191,28 +265,48 @@
 
                 try {
                     const data = await fetchWithRetry();
-                    const raw = data.candidates[0].content.parts[0].text;
-                    const match = raw.match(/\{[\s\S]*\}/);
-                    if (!match) throw new Error("NO_JSON");
-                    const result = JSON.parse(match[0]);
+                    let rawText = data.candidates[0].content.parts[0].text;
+                    // 確保清除可能的 Markdown 標籤
+                    rawText = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
+                    const result = JSON.parse(rawText);
                     
-                    if (result.header) setHeader(prev => ({ ...prev, ...result.header }));
-                    if (result.items) {
-                        setMeasurements(prev => {
-                            const newItems = result.items.map((i, idx) => ({
-                                id: Date.now() + Math.random(),
-                                no: i.no || (prev.length + idx + 1) + ".",
-                                w: parseInt(i.w) || 0, h: parseInt(i.h) || 0,
-                                dw: i.w ? i.w - 48 : 0, dh: i.h ? i.h - 30 : 0,
-                                t: parseInt(i.t) || 0, body: parseInt(i.t) || 0, trim: 50, note: i.note || ""
-                            }));
-                            const final = [...prev, ...newItems];
-                            syncToCloud(final);
-                            return final;
-                        });
+                    let updatedHeader = { ...header };
+                    if (result.header) {
+                        const newHeaderData = {};
+                        // 只覆寫有解析出內容的欄位，保留原本已存在但不打算修改的欄位
+                        for (const key in result.header) {
+                            if (result.header[key]) {
+                                newHeaderData[key] = result.header[key];
+                            }
+                        }
+                        updatedHeader = { ...header, ...newHeaderData };
+                        setHeader(updatedHeader);
                     }
-                } catch (e) { alert("AI 解析失敗，請檢查網路或手動輸入。"); }
-                finally { setIsLoading(false); transcriptAccumulator.current = ""; setTranscript(""); }
+                    
+                    let updatedItems = [...measurements];
+                    if (result.items && result.items.length > 0) {
+                        const newItems = result.items.map((i, idx) => ({
+                            id: Date.now() + Math.random(),
+                            no: i.no || (measurements.length + idx + 1) + ".",
+                            w: i.w || 0, h: i.h || 0,
+                            dw: i.w ? i.w - 48 : 0, dh: i.h ? i.h - 30 : 0,
+                            t: i.t || 0, body: i.t || 0, trim: 50, note: i.note || ""
+                        }));
+                        updatedItems = [...measurements, ...newItems];
+                        setMeasurements(updatedItems);
+                    }
+                    
+                    // 同時存檔更新的資料
+                    syncToCloud(updatedItems, updatedHeader);
+                    
+                } catch (e) { 
+                    alert("AI 解析失敗，請檢查網路或更清晰地重新語音輸入。"); 
+                    console.error("AI Parser Error:", e);
+                } finally { 
+                    setIsLoading(false); 
+                    transcriptAccumulator.current = ""; 
+                    setTranscript(""); 
+                }
             };
 
             const toggleRecording = () => {
@@ -228,12 +322,11 @@
                 }
             };
 
-            // 🚀 恢復影片上傳功能
             const handleVideoSelect = (e) => {
                 const file = e.target.files[0];
                 if (!file || !storage) return;
                 
-                const sRef = window.FB.ref(storage, `artifacts/${FIREBASE_APP_ID}/public/data/videos/${header.orderNo}_${Date.now()}`);
+                const sRef = window.FB.ref(storage, `artifacts/${canvasAppId}/public/data/videos/${header.orderNo}_${Date.now()}`);
                 const task = window.FB.uploadBytesResumable(sRef, file);
                 
                 task.on('state_changed', 
@@ -241,17 +334,35 @@
                     () => alert("影片上傳失敗"),
                     async () => {
                         const url = await window.FB.getDownloadURL(task.snapshot.ref);
-                        setHeader(prev => ({...prev, videoLink: url}));
+                        const newHeader = {...header, videoLink: url};
+                        setHeader(newHeader);
                         setUploadProgress(0);
+                        syncToCloud(null, newHeader);
                         alert("✅ 影片同步完成");
                     }
                 );
             };
 
-            const syncToCloud = async (customItems = null) => {
-                if (!db || !header.orderNo) return;
-                const docRef = window.FB.doc(db, 'artifacts', FIREBASE_APP_ID, 'public', 'data', 'cases', header.orderNo);
-                await window.FB.setDoc(docRef, { ...header, items: customItems || measurements, updatedAt: new Date().toISOString() });
+            const syncToCloud = async (customItems = null, customHeader = null) => {
+                if (!db) return;
+                const currentHeader = customHeader || header;
+                const currentItems = customItems || measurements;
+                if (!currentHeader.orderNo) return;
+
+                const docRef = window.FB.doc(db, 'artifacts', canvasAppId, 'public', 'data', 'cases', currentHeader.orderNo);
+                await window.FB.setDoc(docRef, { ...currentHeader, items: currentItems, updatedAt: new Date().toISOString() });
+            };
+
+            const loadCase = (c) => {
+                setHeader({
+                    orderNo: c.orderNo || "", address: c.address || "", contact: c.contact || "", phone: c.phone || "",
+                    surveyor: c.surveyor || "", company: c.company || "", frameStyle: c.frameStyle || "", doorStyle: c.doorStyle || "",
+                    precautions: c.precautions || "", orderRemark: c.orderRemark || "", redNotice: c.redNotice || "",
+                    partCollision: c.partCollision || "", partHinge: c.partHinge || "", partStop: c.partStop || "", partHandle: c.partHandle || "",
+                    deposit: c.deposit || "0", videoLink: c.videoLink || ""
+                });
+                setMeasurements(c.items || []);
+                setView('main');
             };
 
             const exportExcel = async () => {
@@ -273,9 +384,9 @@
                     const tit = sh.getCell('B2'); tit.value = '下 料 單'; tit.font = { size: 24, bold: true }; tit.alignment = { vertical:'middle', horizontal:'center' };
                     sh.getCell('I2').value = '訂單編號:'; sh.mergeCells('J2:L2'); sh.getCell('J2').value = header.orderNo;
                     sh.getCell('I3').value = '丈量人員:'; sh.mergeCells('J3:L3'); sh.getCell('J3').value = header.surveyor;
-                    sh.getCell('I4').value = '丈量日期:'; sh.mergeCells('J4:L4'); sh.getCell('J4').value = header.date;
+                    sh.getCell('I4').value = '丈量日期:'; sh.mergeCells('J4:L4'); sh.getCell('J4').value = new Date().toISOString().slice(0,10);
 
-                    const meta = [ {a:'公    司:', d:header.company}, {a:'聯 絡 人:', d:header.contact, g:'電話:', h:header.phone}, {a:'案場地址:', d:header.address} ];
+                    const meta = [ {a:'公   司:', d:header.company}, {a:'聯 絡 人:', d:header.contact, g:'電話:', h:header.phone}, {a:'案場地址:', d:header.address} ];
                     meta.forEach((m, i) => {
                         const r = 5 + i; sh.mergeCells(`A${r}:C${r}`); sh.getCell(`A${r}`).value = m.a; sh.mergeCells(`D${r}:F${r}`); sh.getCell(`D${r}`).value = m.d;
                         if(m.g) { sh.mergeCells(`G${r}:H${r}`); sh.getCell(`G${r}`).value = m.g; sh.mergeCells(`I${r}:L${r}`); sh.getCell(`I${r}`).value = m.h; }
@@ -297,9 +408,9 @@
                     });
 
                     const foot = cur + 1;
-                    sh.mergeCells(`A${foot}:D${foot}`); sh.getCell(`A${foot}`).value = "框門注意事項: " + header.precautions;
-                    sh.mergeCells(`E${foot}:L${foot}`); sh.getCell(`E${foot}`).value = "訂單備註: " + header.orderRemark;
-                    sh.getRow(foot).eachCell(c => { c.font={color:{argb:'FF0000FF'}, bold:true}; c.border=border; });
+                    sh.mergeCells(`A${foot}:D${foot}`); sh.getCell(`A${foot}`).value = "框門注意事項: \n" + header.precautions;
+                    sh.mergeCells(`E${foot}:L${foot}`); sh.getCell(`E${foot}`).value = "訂單備註: \n" + header.orderRemark;
+                    sh.getRow(foot).eachCell(c => { c.font={color:{argb:'FF0000FF'}, bold:true}; c.border=border; c.alignment={wrapText:true, vertical:'top'} });
 
                     const redR = foot + 1;
                     sh.mergeCells(`A${redR}:D${redR+4}`); sh.getCell(`A${redR}`).value = header.address + "\n現場確認/門下大陸";
@@ -318,7 +429,6 @@
                 } catch(e) { alert("導出失敗"); } finally { setIsLoading(false); }
             };
 
-            const getTodayDateStr = () => new Date().toISOString().slice(0,10);
             const getLogoBase64 = async () => {
                 return new Promise((resolve) => {
                     const canvas = document.createElement('canvas'); canvas.width = 200; canvas.height = 200;
@@ -334,7 +444,7 @@
             return (
                 <div className="min-h-screen flex flex-col pb-20 relative">
                     <nav className="bg-slate-900 text-white p-5 shadow-xl sticky top-0 z-50 flex justify-between items-center">
-                        <div className="flex items-center gap-3" onClick={() => setView("main")}>
+                        <div className="flex items-center gap-3 cursor-pointer" onClick={() => setView("main")}>
                             {logoImgBase64 ? <div className="bg-white p-1 rounded-xl shadow-lg"><img src={logoImgBase64} className="w-10 h-10 object-contain" /></div> : <div className="bg-blue-600 p-2 rounded-xl"><Icon name="shield-check" className="w-7 h-7" /></div>}
                             <div><h1 className="text-2xl font-black italic uppercase leading-none tracking-tighter">丈量尺寸</h1><span className="text-[10px] font-bold text-emerald-400 tracking-widest uppercase">Official Pro</span></div>
                         </div>
@@ -346,10 +456,9 @@
 
                     {view === "main" ? (
                         <main className="p-4 lg:p-8 max-w-7xl mx-auto w-full space-y-8">
-                            {/* 🚀 找回影片與導出按鈕 */}
                             <div className="card p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
-                                <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">編號</label><input value={header.orderNo} onChange={e=>setHeader({...header, orderNo: e.target.value})} className="w-full border-b-2 p-1 text-2xl font-black text-blue-600 outline-none" /></div>
-                                <div className="lg:col-span-2 space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">案場地址</label><input value={header.address} onChange={e=>setHeader({...header, address: e.target.value})} className="w-full border-b-2 p-1 text-2xl font-bold outline-none" /></div>
+                                <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">編號</label><input value={header.orderNo} onChange={e=>{setHeader({...header, orderNo: e.target.value}); syncToCloud(null, {...header, orderNo: e.target.value});}} className="w-full border-b-2 p-1 text-2xl font-black text-blue-600 outline-none" /></div>
+                                <div className="lg:col-span-2 space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">案場地址</label><input value={header.address} onChange={e=>setHeader({...header, address: e.target.value})} onBlur={()=>syncToCloud()} className="w-full border-b-2 p-1 text-2xl font-bold outline-none" /></div>
                                 <div className="space-y-1 text-center"><label className="text-[10px] font-black text-red-500 uppercase tracking-widest">影片同步</label>
                                     <button onClick={()=>fileInputRef.current.click()} className="w-full bg-slate-50 py-3 rounded-2xl text-[10px] font-black border flex items-center justify-center gap-2 transition-all">
                                         {uploadProgress > 0 ? <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div> : (header.videoLink ? <Icon name="check-circle-2" className="w-5 h-5 text-emerald-500" /> : <Icon name="upload" className="w-5 h-5" />)}
@@ -363,11 +472,10 @@
                             {header.videoLink && (
                                 <div className="bg-black rounded-[2.5rem] overflow-hidden shadow-2xl aspect-video max-w-2xl mx-auto border-8 border-white relative group">
                                     <video src={header.videoLink} controls className="w-full h-full object-cover"></video>
-                                    <button onClick={()=>{setHeader({...header, videoLink:''});}} className="absolute top-6 right-6 bg-white/20 hover:bg-red-500 text-white p-4 rounded-full backdrop-blur-md transition-all shadow-xl"><Icon name="trash-2" className="w-7 h-7" /></button>
+                                    <button onClick={()=>{const newH = {...header, videoLink:''}; setHeader(newH); syncToCloud(null, newH);}} className="absolute top-6 right-6 bg-white/20 hover:bg-red-500 text-white p-4 rounded-full backdrop-blur-md transition-all shadow-xl"><Icon name="trash-2" className="w-7 h-7" /></button>
                                 </div>
                             )}
 
-                            {/* 🚀 AI 語音區：保持強力解析 */}
                             <div className="bg-slate-900 rounded-[3.5rem] p-12 text-center relative overflow-hidden shadow-2xl border-8 border-white">
                                 {isLoading && <div className="absolute inset-0 bg-slate-900/95 z-30 flex flex-col items-center justify-center"><Icon name="loader-2" className="animate-spin text-blue-500 w-20 h-20 mb-4" /><p className="text-blue-400 font-black tracking-widest text-lg animate-pulse uppercase italic">AI 正在自動帶入數據...</p></div>}
                                 <button onClick={toggleRecording} className={`w-40 h-40 rounded-full flex items-center justify-center mx-auto transition-all border-[14px] border-slate-800 shadow-2xl ${isRecording ? 'record-pulse' : 'bg-white hover:scale-105'}`}>
@@ -379,7 +487,11 @@
                             <div className="card overflow-hidden">
                                 <div className="p-6 bg-slate-50 border-b flex justify-between items-center bg-slate-50/80">
                                     <h3 className="section-title italic tracking-widest uppercase">丈量數據列表</h3>
-                                    <button onClick={() => setMeasurements([...measurements, { id: Date.now(), no: (measurements.length+1)+".", w:0, h:0, dw:0, dh:0, t:0, note:"" }])} className="bg-indigo-600 text-white px-6 py-3 rounded-2xl text-sm font-black shadow-lg">+ 手動新增</button>
+                                    <button onClick={() => {
+                                        const newItems = [...measurements, { id: Date.now(), no: (measurements.length+1)+".", w:0, h:0, dw:0, dh:0, t:0, note:"" }];
+                                        setMeasurements(newItems);
+                                        syncToCloud(newItems);
+                                    }} className="bg-indigo-600 text-white px-6 py-3 rounded-2xl text-sm font-black shadow-lg">+ 手動新增</button>
                                 </div>
                                 <div className="overflow-x-auto no-scrollbar">
                                     <table className="w-full text-left min-w-[1100px] border-separate border-spacing-0">
@@ -390,21 +502,25 @@
                                             {measurements.map(m => (
                                                 <tr key={m.id} className="hover:bg-blue-50/20 group">
                                                     <td className="px-8 py-6 font-bold text-slate-400 text-xl italic">{m.no}</td>
-                                                    <td className="px-4 py-6"><input type="number" value={m.w} onChange={e=>{
+                                                    <td className="px-4 py-6"><input type="number" value={m.w} onBlur={()=>syncToCloud()} onChange={e=>{
                                                         const val = parseInt(e.target.value) || 0;
                                                         setMeasurements(measurements.map(x => x.id === m.id ? {...x, w:val, dw:val-48} : x));
                                                     }} className="w-full bg-transparent border-none p-0 text-2xl font-black text-blue-800 focus:ring-0" /></td>
-                                                    <td className="px-4 py-6"><input type="number" value={m.h} onChange={e=>{
+                                                    <td className="px-4 py-6"><input type="number" value={m.h} onBlur={()=>syncToCloud()} onChange={e=>{
                                                         const val = parseInt(e.target.value) || 0;
                                                         setMeasurements(measurements.map(x => x.id === m.id ? {...x, h:val, dh:val-30} : x));
                                                     }} className="w-full bg-transparent border-none p-0 text-2xl font-black text-blue-800 focus:ring-0" /></td>
                                                     <td className="px-4 py-6 bg-emerald-50/10 font-black text-emerald-600 text-4xl tracking-tighter text-center border-x">{m.dw}</td>
                                                     <td className="px-4 py-3 bg-emerald-50/10 font-black text-emerald-600 text-4xl tracking-tighter text-center border-r">{m.dh}</td>
-                                                    <td className="px-4 py-6"><input type="number" value={m.t} onChange={e=>{
-                                                        setMeasurements(measurements.map(x => x.id === m.id ? {...x, t:e.target.value, body:e.target.value} : x));
+                                                    <td className="px-4 py-6"><input type="number" value={m.t} onBlur={()=>syncToCloud()} onChange={e=>{
+                                                        setMeasurements(measurements.map(x => x.id === m.id ? {...x, t:parseInt(e.target.value)||0, body:parseInt(e.target.value)||0} : x));
                                                     }} className="w-full bg-transparent border-none p-0 text-2xl font-bold text-center focus:ring-0" /></td>
-                                                    <td className="px-8 py-6"><input value={m.note} onChange={e=>setMeasurements(measurements.map(x=>x.id===m.id?{...x, note:e.target.value}:x))} className="w-full bg-transparent border-none p-0 text-sm text-slate-500 font-bold italic focus:ring-0" /></td>
-                                                    <td className="px-4 py-6 text-center"><button onClick={() => setMeasurements(measurements.filter(x=>x.id!==m.id))} className="text-slate-300 hover:text-red-500 transition-all opacity-0 group-hover:opacity-100 p-2"><Icon name="trash-2" className="w-6 h-6" /></button></td>
+                                                    <td className="px-8 py-6"><input value={m.note} onBlur={()=>syncToCloud()} onChange={e=>setMeasurements(measurements.map(x=>x.id===m.id?{...x, note:e.target.value}:x))} className="w-full bg-transparent border-none p-0 text-sm text-slate-500 font-bold italic focus:ring-0" /></td>
+                                                    <td className="px-4 py-6 text-center"><button onClick={() => {
+                                                        const newArr = measurements.filter(x=>x.id!==m.id);
+                                                        setMeasurements(newArr);
+                                                        syncToCloud(newArr);
+                                                    }} className="text-slate-300 hover:text-red-500 transition-all opacity-0 group-hover:opacity-100 p-2"><Icon name="trash-2" className="w-6 h-6" /></button></td>
                                                 </tr>
                                             ))}
                                         </tbody>
@@ -416,16 +532,16 @@
                                 <h3 className="section-title uppercase tracking-widest italic">五金配件與詳細備註 (語音自動帶入)</h3>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
                                     <div className="space-y-6">
-                                        <div className="space-y-2"><label className="text-[10px] font-black text-blue-500 uppercase tracking-widest">注意事項</label><textarea rows="2" value={header.precautions} onChange={e=>setHeader({...header, precautions:e.target.value})} className="w-full bg-slate-50 border rounded-2xl p-5 text-xl font-bold resize-none" /></div>
-                                        <div className="space-y-2"><label className="text-[10px] font-black text-blue-500 uppercase tracking-widest">訂單備註</label><textarea rows="2" value={header.orderRemark} onChange={e=>setHeader({...header, orderRemark:e.target.value})} className="w-full bg-slate-50 border rounded-2xl p-5 text-xl font-bold resize-none" /></div>
+                                        <div className="space-y-2"><label className="text-[10px] font-black text-blue-500 uppercase tracking-widest">注意事項</label><textarea rows="2" value={header.precautions} onBlur={()=>syncToCloud()} onChange={e=>setHeader({...header, precautions:e.target.value})} className="w-full bg-slate-50 border rounded-2xl p-5 text-xl font-bold resize-none" placeholder="語音自動帶入" /></div>
+                                        <div className="space-y-2"><label className="text-[10px] font-black text-blue-500 uppercase tracking-widest">訂單備註</label><textarea rows="2" value={header.orderRemark} onBlur={()=>syncToCloud()} onChange={e=>setHeader({...header, orderRemark:e.target.value})} className="w-full bg-slate-50 border rounded-2xl p-5 text-xl font-bold resize-none" placeholder="語音自動帶入" /></div>
                                     </div>
-                                    <div className="space-y-2"><label className="text-[10px] font-black text-red-500 italic font-black uppercase tracking-widest">大紅字警示區</label><textarea rows="5" value={header.redNotice} onChange={e=>setHeader({...header, redNotice:e.target.value})} className="w-full bg-red-50/30 border border-red-100 rounded-[2.5rem] p-6 text-red-600 font-black text-4xl text-center resize-none leading-relaxed shadow-inner" /></div>
+                                    <div className="space-y-2"><label className="text-[10px] font-black text-red-500 italic font-black uppercase tracking-widest">大紅字警示區</label><textarea rows="5" value={header.redNotice} onBlur={()=>syncToCloud()} onChange={e=>setHeader({...header, redNotice:e.target.value})} className="w-full bg-red-50/30 border border-red-100 rounded-[2.5rem] p-6 text-red-600 font-black text-4xl text-center resize-none leading-relaxed shadow-inner" placeholder="語音自動帶入 (如: 門下大陸)" /></div>
                                 </div>
                                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-8">
                                     {['partCollision','partHinge','partStop','partHandle'].map((key, i) => (
                                         <div key={key} className="bg-slate-50 p-6 rounded-3xl border border-slate-200 shadow-sm">
                                             <label className="text-[10px] font-black text-slate-400 mb-3 block uppercase tracking-widest">{['防撞條','鉸鏈','門止','把手'][i]}</label>
-                                            <textarea rows="4" value={header[key]} onChange={e=>setHeader({...header, [key]:e.target.value})} className="w-full bg-white border rounded-2xl p-4 text-2xl font-black outline-none resize-none text-center leading-loose text-slate-700 shadow-inner" placeholder="語音自動帶入" />
+                                            <textarea rows="4" value={header[key]} onBlur={()=>syncToCloud()} onChange={e=>setHeader({...header, [key]:e.target.value})} className="w-full bg-white border rounded-2xl p-4 text-2xl font-black outline-none resize-none text-center leading-loose text-slate-700 shadow-inner" placeholder="語音自動帶入" />
                                         </div>
                                     ))}
                                 </div>
