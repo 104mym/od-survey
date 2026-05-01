@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>智揚雲端下料助手 - 終極旗艦版</title>
+    <title>智揚雲端下料助手 - 管理員旗艦版</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -17,9 +17,10 @@
         @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); } 70% { box-shadow: 0 0 0 20px rgba(239, 68, 68, 0); } 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); } }
         .virtual-list { max-height: 55vh; overflow-y: auto; }
         input:focus, textarea:focus { border-color: #2563eb !important; outline: none; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1); }
-        .section-title { border-left: 6px solid #2563eb; padding-left: 14px; font-weight: 900; color: #1e293b; letter-spacing: 1px; font-size: 1.25rem; }
+        .section-title { border-left: 6px solid #2563eb; padding-left: 14px; font-weight: 900; color: #1e293b; letter-spacing: 1px; font-size: 1.5rem; }
         .badge { background: #e0f2fe; color: #0369a1; font-size: 14px; padding: 4px 8px; border-radius: 6px; font-weight: 900; }
-        .card { background: white; border-radius: 2rem; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05); border: 1px solid #e2e8f0; overflow: hidden; }
+        .card { background: white; border-radius: 2.5rem; box-shadow: 0 10px 25px -5px rgb(0 0 0 / 0.1); border: 1px solid #e2e8f0; overflow: hidden; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
     </style>
 </head>
 <body>
@@ -36,6 +37,29 @@
 
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
+
+        // 安全圖示元件：避免 React DOM 衝突崩潰
+        const Icon = ({ name, className }) => {
+            const ref = useRef(null);
+            useEffect(() => {
+                if (ref.current && window.lucide) {
+                    const temp = document.createElement('div');
+                    temp.innerHTML = `<i data-lucide="${name}"></i>`;
+                    window.lucide.createIcons({ root: temp });
+                    const svg = temp.querySelector('svg');
+                    if (svg) {
+                        if (className) {
+                            className.split(' ').forEach(c => {
+                                if (c.trim()) svg.classList.add(c.trim());
+                            });
+                        }
+                        ref.current.innerHTML = '';
+                        ref.current.appendChild(svg);
+                    }
+                }
+            }, [name, className]);
+            return <span ref={ref} className="inline-flex items-center justify-center" />;
+        };
 
         const apiKey = ""; // 執行環境自動提供
 
@@ -84,15 +108,6 @@
 
             const [timer, setTimer] = useState(0);
 
-            const firebaseConfig = {
-                apiKey: "AIzaSyBEcCQcuwCh30xDmj3wE-3CM2YffgIxfAk",
-                authDomain: "tao-men.firebaseapp.com",
-                projectId: "tao-men",
-                storageBucket: "tao-men.firebasestorage.app",
-                messagingSenderId: "332609297071",
-                appId: "1:332609297071:web:03593a930475c97b87525a"
-            };
-
             useEffect(() => {
                 let interval;
                 if (isRecording) {
@@ -106,6 +121,9 @@
             useEffect(() => {
                 const init = async () => {
                     try {
+                        const firebaseConfig = JSON.parse(__firebase_config);
+                        const appId = typeof __app_id !== 'undefined' ? __app_id : 'od-survey-system';
+                        
                         const app = window.FB.initializeApp(firebaseConfig);
                         const firestore = window.FB.getFirestore(app);
                         const storageInstance = window.FB.getStorage(app);
@@ -113,15 +131,21 @@
                         setStorage(storageInstance);
                         
                         const auth = window.FB.getAuth(app);
-                        try { await window.FB.signInAnonymously(auth); } catch(e) {}
+                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                            await window.FB.signInWithCustomToken(auth, __initial_auth_token);
+                        } else {
+                            await window.FB.signInAnonymously(auth);
+                        }
 
                         window.FB.onAuthStateChanged(auth, (u) => {
-                            setMode("Cloud");
-                            fetchHistory(firestore);
-                            setIsReady(true);
+                            if (u) {
+                                setMode("Cloud");
+                                fetchHistory(firestore, appId);
+                                setIsReady(true);
+                            }
                         });
                         
-                        setTimeout(() => setIsReady(true), 1000);
+                        setTimeout(() => setIsReady(true), 1500);
                     } catch (e) { 
                         setMode("Local");
                         setIsReady(true); 
@@ -148,17 +172,18 @@
                     };
                     
                     recognitionRef.current.onend = () => {
-                        setIsRecording(false);
-                        if (transcriptAccumulator.current) parseSpeech(transcriptAccumulator.current);
+                        if (isRecording) {
+                            try { recognitionRef.current.start(); } catch(e){}
+                        }
                     };
                     
                     recognitionRef.current.onerror = () => setIsRecording(false);
                 }
             }, []);
 
-            const fetchHistory = (fdb) => {
+            const fetchHistory = (fdb, curAppId) => {
                 try {
-                    const colRef = window.FB.collection(fdb, 'artifacts', 'od-app', 'public', 'data', 'cases');
+                    const colRef = window.FB.collection(fdb, 'artifacts', curAppId, 'public', 'data', 'cases');
                     window.FB.onSnapshot(colRef, (snap) => {
                         const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                         setAllCases(list.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)));
@@ -174,9 +199,7 @@
                     const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            contents: [{ parts: [{ text: prompt }] }]
-                        })
+                        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
                     });
                     const data = await resp.json();
                     const clean = data.candidates[0].content.parts[0].text.replace(/```json|```/g, "").trim();
@@ -187,15 +210,18 @@
                             const newItems = p.items.map((item, idx) => ({
                                 id: Date.now() + Math.random(),
                                 no: (prev.length + idx + 1) + ".",
-                                w: item.w || 0, h: item.h || 0, 
-                                dw: (item.w || 0) - 48, dh: (item.h || 0) - 30, 
-                                t: item.t || 0,
+                                w: parseInt(item.w) || 0, h: parseInt(item.h) || 0, 
+                                dw: item.w ? parseInt(item.w) - 48 : 0, 
+                                dh: item.h ? parseInt(item.h) - 30 : 0, 
+                                t: parseInt(item.t) || 0,
+                                body: parseInt(item.t) || 0,
+                                trim: 50,
                                 style: item.style || "房", note: item.note || ""
                             }));
                             return [...prev, ...newItems];
                         });
                     }
-                } catch (e) { alert("AI 解析失敗，請手動輸入。"); }
+                } catch (e) { console.error(e); }
                 finally { 
                     setIsLoading(false); 
                     transcriptAccumulator.current = "";
@@ -208,6 +234,7 @@
                 if (isRecording) {
                     recognitionRef.current.stop();
                     setIsRecording(false);
+                    if (transcriptAccumulator.current) parseSpeech(transcriptAccumulator.current);
                 } else {
                     transcriptAccumulator.current = "";
                     setTranscript("");
@@ -225,11 +252,12 @@
                 setVideoUrl(URL.createObjectURL(file));
 
                 if (!storage || mode === "Local") {
-                    alert("雲端未連通，無法自動上傳。請自行上傳後貼上網址。");
+                    alert("目前為本地模式。請手動上傳後貼上網址，或連線雲端後上傳。");
                     return;
                 }
 
-                const storageRef = window.FB.ref(storage, `artifacts/od-survey-system/videos/${header.orderNo}_${Date.now()}`);
+                const appId = typeof __app_id !== 'undefined' ? __app_id : 'od-official-app';
+                const storageRef = window.FB.ref(storage, `artifacts/${appId}/videos/${header.orderNo}_${Date.now()}`);
                 const uploadTask = window.FB.uploadBytesResumable(storageRef, file);
 
                 uploadTask.on('state_changed', 
@@ -238,8 +266,7 @@
                         setUploadProgress(progress);
                     }, 
                     (error) => {
-                        console.error(error);
-                        alert("影片上傳失敗！");
+                        alert("影片上傳失敗！檔案可能過大。");
                         setUploadProgress(0);
                     }, 
                     async () => {
@@ -255,7 +282,8 @@
                 if (mode === "Local") return alert("目前為單機模式，請檢查網路。");
                 setIsLoading(true);
                 try {
-                    const docRef = window.FB.doc(db, 'artifacts', 'od-app', 'public', 'data', 'cases', header.orderNo);
+                    const appId = typeof __app_id !== 'undefined' ? __app_id : 'od-official-app';
+                    const docRef = window.FB.doc(db, 'artifacts', appId, 'public', 'data', 'cases', header.orderNo);
                     await window.FB.setDoc(docRef, { ...header, items: measurements, updatedAt: new Date().toISOString() });
                     alert("✅ 雲端同步成功！");
                 } catch (e) { alert("同步失敗"); }
@@ -267,7 +295,8 @@
                 setDeleteConfirm(null);
                 setIsLoading(true);
                 try {
-                    const docRef = window.FB.doc(db, 'artifacts', 'od-app', 'public', 'data', 'cases', orderNo);
+                    const appId = typeof __app_id !== 'undefined' ? __app_id : 'od-official-app';
+                    const docRef = window.FB.doc(db, 'artifacts', appId, 'public', 'data', 'cases', orderNo);
                     await window.FB.deleteDoc(docRef);
                 } catch (error) { console.error("刪除失敗", error); } 
                 finally { setIsLoading(false); }
@@ -280,13 +309,12 @@
                 setView("main"); 
             };
 
-            const handleUpdate = (id, field, val) => {
+            const handleUpdateRow = (id, field, val) => {
                 setMeasurements(prev => prev.map(m => {
                     if (m.id === id) {
                         let u = { ...m, [field]: val };
                         if (field === 'w') u.dw = val ? parseInt(val) - 48 : 0;
                         if (field === 'h') u.dh = val ? parseInt(val) - 30 : 0;
-                        if (field === 't') u.body = val;
                         return u;
                     }
                     return m;
@@ -377,11 +405,31 @@
                     });
 
                     const footStart = cur + 1;
-                    sheet.mergeCells(`A${footStart}:D${footStart}`); sheet.getCell(`A${footStart}`).value = "框門注意事項: " + header.precautions;
-                    sheet.mergeCells(`E${footStart}:L${footStart}`); sheet.getCell(`E${footStart}`).value = "訂單備註: " + header.orderRemark;
+                    sheet.mergeCells(`A${footStart}:D${footStart}`); 
+                    sheet.getCell(`A${footStart}`).value = "框門注意事項: " + header.precautions;
+                    sheet.mergeCells(`E${footStart}:L${footStart}`); 
+                    sheet.getCell(`E${footStart}`).value = "訂單備註: " + header.orderRemark;
                     sheet.getRow(footStart).eachCell(c => { c.font = { color:{argb:'FF0000FF'}, bold:true }; c.border = borderAll; });
 
                     const redR = footStart + 1;
+                    
+                    const firstM = measurements[0] || {};
+                    const summary = `${firstM.w||0}/${firstM.h||0}/${firstM.t||0}/${firstM.style||'房'}/${firstM.stop||'隱'}/地板確認`;
+                    
+                    sheet.mergeCells(`A${redR}:D${redR}`); sheet.getCell(`A${redR}`).value = header.address;
+                    sheet.mergeCells(`A${redR+1}:D${redR+1}`); sheet.getCell(`A${redR+1}`).value = summary;
+                    sheet.mergeCells(`A${redR+2}:D${redR+2}`); sheet.getCell(`A${redR+2}`).value = "門下大陸/框可以工廠切好";
+                    
+                    for(let r=redR; r<=redR+2; r++) {
+                        sheet.getCell(`A${r}`).alignment = { vertical:'middle', horizontal:'left' };
+                        sheet.getCell(`A${r}`).font = { size: 10, color: { argb: 'FF555555' } };
+                        for(let c=1; c<=4; c++) {
+                            const cell = sheet.getCell(r, c);
+                            cell.fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FFE7E6E6'} };
+                            cell.border = borderAll;
+                        }
+                    }
+
                     sheet.mergeCells(`E${redR}:L${redR+4}`);
                     const redC = sheet.getCell(`E${redR}`);
                     redC.value = header.redNotice;
@@ -425,23 +473,21 @@
                     link.href = URL.createObjectURL(new Blob([buffer]));
                     link.download = `歐德下料單_${header.orderNo}.xlsx`;
                     link.click();
-                } catch(e) { console.error(e); alert("導出失敗"); } finally { setIsLoading(false); }
+                } catch(e) { alert("導出失敗"); } finally { setIsLoading(false); }
             };
-
-            useEffect(() => { if (isReady) setTimeout(() => lucide.createIcons(), 100); }, [measurements, isReady, view, isRecording, videoUrl, uploadProgress]);
 
             if (!isReady) return <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white italic font-black text-3xl uppercase tracking-widest">系統啟動中...</div>;
 
             return (
                 <div className="min-h-screen flex flex-col pb-20 relative">
                     {deleteConfirm && (
-                        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-                            <div className="bg-white rounded-3xl p-8 max-w-sm w-full shadow-2xl">
-                                <h3 className="text-xl font-black text-slate-800 mb-2">確定要刪除嗎？</h3>
-                                <p className="text-slate-500 font-bold mb-8">訂單 [{deleteConfirm}] 將永久刪除。</p>
+                        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[100] flex items-center justify-center p-4">
+                            <div className="bg-white rounded-[2.5rem] p-10 max-w-sm w-full shadow-2xl">
+                                <h3 className="text-2xl font-black text-slate-800 text-center mb-2">確認要刪除嗎？</h3>
+                                <p className="text-slate-500 font-bold text-center mb-10">訂單 [{deleteConfirm}] 將永久刪除。</p>
                                 <div className="flex gap-4">
-                                    <button onClick={() => setDeleteConfirm(null)} className="flex-1 bg-slate-100 py-3 rounded-xl font-black">取消</button>
-                                    <button onClick={() => confirmDeleteHistory(deleteConfirm)} className="flex-1 bg-red-500 text-white py-3 rounded-xl font-black">確認刪除</button>
+                                    <button onClick={() => setDeleteConfirm(null)} className="flex-1 bg-slate-100 py-4 rounded-2xl font-black">取消</button>
+                                    <button onClick={() => confirmDeleteHistory(deleteConfirm)} className="flex-1 bg-red-500 text-white py-4 rounded-2xl font-black">確認刪除</button>
                                 </div>
                             </div>
                         </div>
@@ -450,89 +496,89 @@
                     <nav className="bg-slate-900 text-white p-5 shadow-xl sticky top-0 z-50">
                         <div className="max-w-7xl mx-auto flex justify-between items-center">
                             <div className="flex items-center gap-3" onClick={() => setView("main")}>
-                                <div className="bg-blue-600 p-2 rounded-lg shadow-lg"><i data-lucide="shield-check" className="w-6 h-6"></i></div>
+                                <div className="bg-blue-600 p-2 rounded-lg shadow-lg"><Icon name="shield-check" className="w-7 h-7" /></div>
                                 <div><h1 className="text-2xl font-black italic tracking-tighter uppercase leading-none">智揚助理</h1><span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{mode} Mode</span></div>
                             </div>
                             <div className="flex gap-3">
-                                <button onClick={() => setView(view === 'main' ? 'history' : 'main')} className="bg-slate-800 text-white px-4 py-2.5 rounded-xl text-sm font-black flex items-center gap-2"><i data-lucide={view === 'main' ? "list" : "chevron-left"} className="w-4 h-4"></i> {view === 'main' ? "紀錄" : "返回"}</button>
-                                <button onClick={handleSync} className="bg-blue-600 text-white px-4 py-2.5 rounded-xl text-sm font-black shadow-lg flex items-center gap-2">同步雲端</button>
+                                <button onClick={() => setView(view === 'main' ? 'history' : 'main')} className="bg-slate-800 text-white px-5 py-3 rounded-2xl text-sm font-black flex items-center gap-2"><Icon name={view === 'main' ? "list" : "chevron-left"} className="w-5 h-5" /> {view === 'main' ? "歷史紀錄" : "返回"}</button>
+                                <button onClick={handleSync} className="bg-blue-600 text-white px-5 py-3 rounded-2xl text-sm font-black shadow-lg">同步雲端</button>
                             </div>
                         </div>
                     </nav>
 
                     {view === "main" ? (
-                        <main className="p-4 lg:p-8 max-w-7xl mx-auto w-full space-y-6">
-                            <div className="card p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
+                        <main className="p-4 lg:p-8 max-w-7xl mx-auto w-full space-y-8">
+                            <div className="card p-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-8">
                                 <div className="space-y-2">
-                                    <label className="text-sm font-black text-slate-400 uppercase">訂單編號</label>
-                                    <input value={header.orderNo} onChange={e=>setHeader({...header, orderNo: e.target.value})} className="w-full border-b-2 p-2 text-xl font-black text-blue-600 outline-none" />
+                                    <label className="text-xs font-black text-slate-400 uppercase tracking-widest">訂單編號</label>
+                                    <input value={header.orderNo} onChange={e=>setHeader({...header, orderNo: e.target.value})} className="w-full border-b-2 p-2 text-2xl font-black text-blue-600 outline-none" />
                                 </div>
                                 <div className="lg:col-span-2 space-y-2">
-                                    <label className="text-sm font-black text-slate-400 uppercase">案場地址</label>
-                                    <input value={header.address} onChange={e=>setHeader({...header, address: e.target.value})} className="w-full border-b-2 p-2 text-xl font-bold outline-none" />
+                                    <label className="text-xs font-black text-slate-400 uppercase tracking-widest">案場地址</label>
+                                    <input value={header.address} onChange={e=>setHeader({...header, address: e.target.value})} className="w-full border-b-2 p-2 text-2xl font-bold outline-none" />
                                 </div>
                                 <div className="space-y-2 text-center">
-                                    <label className="text-sm font-black text-slate-400 uppercase text-red-500 flex items-center justify-center gap-1"><i data-lucide="video" className="w-4 h-4"></i> 現場影片</label>
-                                    <button onClick={()=>fileInputRef.current.click()} className="w-full bg-slate-50 py-3 rounded-xl text-sm font-black border flex items-center justify-center gap-2 transition-all">
-                                        {uploadProgress > 0 && uploadProgress < 100 ? <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div> : 
-                                         header.videoLink ? <i data-lucide="check-circle-2" className="w-5 h-5 text-emerald-500"></i> : <i data-lucide="upload" className="w-5 h-5"></i>}
-                                        {uploadProgress > 0 && uploadProgress < 100 ? `上傳中 ${Math.round(uploadProgress)}%` : header.videoLink ? "影片已選取" : "上傳影片"}
+                                    <label className="text-xs font-black text-slate-400 uppercase text-red-500 flex items-center justify-center gap-2 tracking-widest"><Icon name="video" className="w-4 h-4" /> 現場影片</label>
+                                    <button onClick={()=>fileInputRef.current.click()} className="w-full bg-slate-50 py-3 rounded-2xl text-sm font-black border flex items-center justify-center gap-2 transition-all">
+                                        {uploadProgress > 0 && uploadProgress < 100 ? <div className="w-5 h-5 border-3 border-blue-500 border-t-transparent rounded-full animate-spin"></div> : 
+                                         header.videoLink ? <Icon name="check-circle-2" className="w-5 h-5 text-emerald-500" /> : <Icon name="upload" className="w-5 h-5" />}
+                                        {uploadProgress > 0 && uploadProgress < 100 ? `${Math.round(uploadProgress)}%` : header.videoLink ? "影片已同步" : "上傳影片"}
                                     </button>
                                     <input type="file" ref={fileInputRef} hidden accept="video/*" onChange={handleVideoSelect} />
                                 </div>
-                                <button onClick={exportExcel} className="bg-emerald-600 text-white py-3 rounded-xl text-sm font-black shadow-lg flex items-center justify-center gap-2 mt-auto active:scale-95 transition-all"><i data-lucide="file-spreadsheet" className="w-5 h-5"></i> 導出 Excel</button>
+                                <button onClick={exportExcel} className="bg-emerald-600 text-white py-3 rounded-xl text-sm font-black shadow-lg flex items-center justify-center gap-2 mt-auto active:scale-95 transition-all"><Icon name="file-spreadsheet" className="w-6 h-6" /> 導出 Excel</button>
                             </div>
 
                             {videoUrl && (
-                                <div className="bg-black rounded-[2.5rem] overflow-hidden shadow-2xl aspect-video max-w-2xl mx-auto border-8 border-white relative group">
+                                <div className="bg-black rounded-[2.5rem] overflow-hidden shadow-2xl aspect-video max-w-3xl mx-auto border-8 border-white relative group">
                                     <video src={videoUrl} controls className="w-full h-full object-cover"></video>
-                                    <button onClick={() => {setVideoUrl(null); setHeader({...header, videoLink: ''});}} className="absolute top-4 right-4 bg-white/20 hover:bg-red-500 text-white p-3 rounded-full backdrop-blur-md transition-all"><i data-lucide="trash-2" className="w-6 h-6"></i></button>
+                                    <button onClick={() => {setVideoUrl(null); setHeader({...header, videoLink: ''});}} className="absolute top-6 right-6 bg-white/20 hover:bg-red-500 text-white p-4 rounded-full backdrop-blur-md transition-all shadow-xl"><Icon name="trash-2" className="w-7 h-7" /></button>
                                 </div>
                             )}
 
-                            <div className="bg-orange-50 rounded-[1.5rem] p-6 border border-orange-100 grid grid-cols-2 gap-6">
+                            <div className="bg-orange-50 rounded-[2rem] p-8 border border-orange-100 grid grid-cols-2 gap-8">
                                 <div className="space-y-2">
-                                    <label className="text-sm font-black text-orange-400">門框樣式</label>
-                                    <input value={header.frameStyle} onChange={e=>setHeader({...header, frameStyle:e.target.value})} className="w-full bg-transparent border-b-2 border-orange-200 p-2 text-xl font-bold text-orange-900 outline-none" />
+                                    <label className="text-xs font-black text-orange-400 uppercase tracking-widest">門框樣式</label>
+                                    <input value={header.frameStyle} onChange={e=>setHeader({...header, frameStyle:e.target.value})} className="w-full bg-transparent border-b-2 border-orange-200 p-2 text-2xl font-bold text-orange-900 outline-none" />
                                 </div>
                                 <div className="space-y-2">
-                                    <label className="text-sm font-black text-orange-400">門片樣式</label>
-                                    <input value={header.doorStyle} onChange={e=>setHeader({...header, doorStyle:e.target.value})} className="w-full bg-transparent border-b-2 border-orange-200 p-2 text-xl font-bold text-orange-900 outline-none" />
+                                    <label className="text-xs font-black text-orange-400 uppercase tracking-widest">門片樣式</label>
+                                    <input value={header.doorStyle} onChange={e=>setHeader({...header, doorStyle:e.target.value})} className="w-full bg-transparent border-b-2 border-orange-200 p-2 text-2xl font-bold text-orange-900 outline-none" />
                                 </div>
                             </div>
 
-                            <div className="bg-slate-900 rounded-[3rem] p-10 text-center relative overflow-hidden shadow-2xl border-8 border-white">
-                                {isLoading && <div className="absolute inset-0 bg-slate-900/90 z-30 flex items-center justify-center"><i data-lucide="loader-2" className="animate-spin text-blue-500 w-16 h-16"></i></div>}
-                                <button onClick={toggleRecording} className={`w-36 h-36 rounded-full flex items-center justify-center mx-auto transition-all border-[12px] border-slate-800 shadow-2xl ${isRecording ? 'record-pulse' : 'bg-white'}`}>
-                                    {isRecording ? <div className="w-10 h-10 bg-white rounded-lg"></div> : <i data-lucide="mic" className="w-16 h-16 text-slate-900"></i>}
+                            <div className="bg-slate-900 rounded-[3.5rem] p-10 text-center relative overflow-hidden shadow-2xl border-8 border-white">
+                                {isLoading && <div className="absolute inset-0 bg-slate-900/95 z-30 flex items-center justify-center"><Icon name="loader-2" className="animate-spin text-blue-500 w-20 h-20" /></div>}
+                                <button onClick={toggleRecording} className={`w-36 h-36 rounded-full flex items-center justify-center mx-auto transition-all border-[12px] border-slate-800 shadow-2xl ${isRecording ? 'record-pulse' : 'bg-white hover:scale-105'}`}>
+                                    {isRecording ? <div className="w-12 h-12 bg-white rounded-lg"></div> : <Icon name="mic" className="w-20 h-20 text-slate-900" />}
                                 </button>
-                                {transcript && <p className="mt-6 text-white/50 text-sm font-bold tracking-widest italic">「{transcript}」</p>}
+                                {transcript && <p className="mt-8 text-white/50 text-sm font-bold tracking-widest italic">「{transcript}」</p>}
                             </div>
 
                             <div className="card overflow-hidden">
-                                <div className="p-5 bg-slate-50 border-b flex justify-between items-center">
-                                    <h3 className="section-title">尺寸明細 ({measurements.length})</h3>
-                                    <button onClick={() => setMeasurements([...measurements, { id: Date.now(), no: (measurements.length+1)+".", w:0, h:0, dw:0, dh:0, t:0, style:"房", note:"" }])} className="bg-indigo-600 text-white px-5 py-3 rounded-2xl text-sm font-black shadow-lg">+ 手動新增</button>
+                                <div className="p-6 bg-slate-50 border-b flex justify-between items-center">
+                                    <h3 className="section-title">尺寸明細 ({measurements.length} 樘)</h3>
+                                    <button onClick={() => setMeasurements([...measurements, { id: Date.now(), no: (measurements.length+1)+".", w:0, h:0, dw:0, dh:0, t:0, body:0, trim:50, note:"" }])} className="bg-indigo-600 text-white px-6 py-3 rounded-2xl text-sm font-black shadow-lg">+ 手動新增</button>
                                 </div>
                                 <div className="overflow-x-auto virtual-list">
                                     <table className="w-full text-left min-w-[1000px] border-separate border-spacing-0">
-                                        <thead className="bg-slate-50 text-sm text-slate-400 font-black uppercase sticky top-0 z-20">
-                                            <tr><th className="px-6 py-5">編號</th><th className="px-4 py-5">洞寬</th><th className="px-4 py-5">洞高</th><th className="px-4 py-5 text-emerald-600 border-x">門寬</th><th className="px-4 py-5 text-emerald-600 border-r">門高</th><th className="px-4 py-5">牆厚</th><th className="px-6 py-5">備註 / 樣式</th><th className="px-4 py-5 w-20"></th></tr>
+                                        <thead className="bg-slate-50 text-sm text-slate-400 font-black uppercase sticky top-0 z-20 shadow-sm">
+                                            <tr><th className="px-8 py-6">編號</th><th className="px-4 py-6">洞寬</th><th className="px-4 py-6">洞高</th><th className="px-4 py-6 text-emerald-600 border-x">門寬</th><th className="px-4 py-6 text-emerald-600 border-r">門高</th><th className="px-4 py-6 text-center">牆厚</th><th className="px-8 py-6">備註 / 樣式</th><th className="px-4 py-6"></th></tr>
                                         </thead>
                                         <tbody className="divide-y divide-slate-100">
                                             {measurements.map(m => (
-                                                <tr key={m.id} className="hover:bg-blue-50/20">
-                                                    <td className="px-6 py-5 font-bold text-slate-400 text-base">{m.no}</td>
-                                                    <td className="px-4 py-5"><input type="number" value={m.w} onChange={e=>handleUpdate(m.id, 'w', e.target.value)} className="w-full bg-transparent border-none p-0 text-xl font-black text-blue-800 focus:ring-0" /></td>
-                                                    <td className="px-4 py-5"><input type="number" value={m.h} onChange={e=>handleUpdate(m.id, 'h', e.target.value)} className="w-full bg-transparent border-none p-0 text-xl font-black text-blue-800 focus:ring-0" /></td>
-                                                    <td className="px-4 py-5 bg-emerald-50/10 font-black text-emerald-600 text-2xl text-center border-x">{m.dw}</td>
-                                                    <td className="px-4 py-5 bg-emerald-50/10 font-black text-emerald-600 text-2xl text-center border-r">{m.dh}</td>
-                                                    <td className="px-4 py-5"><input type="number" value={m.t} onChange={e=>handleUpdate(m.id, 't', e.target.value)} className="w-full bg-transparent border-none p-0 text-lg font-bold text-center focus:ring-0" /></td>
-                                                    <td className="px-6 py-5 flex flex-col gap-2">
-                                                        <div className="flex gap-2"><span className="badge">{m.style}</span><span className="badge">隱止</span></div>
-                                                        <input value={m.note} onChange={e=>handleUpdate(m.id, 'note', e.target.value)} className="w-full bg-transparent border-none p-0 text-sm text-slate-500 italic" placeholder="備註..." />
+                                                <tr key={m.id} className="hover:bg-blue-50/20 group transition-all">
+                                                    <td className="px-8 py-6 font-bold text-slate-400 text-xl italic">{m.no}</td>
+                                                    <td className="px-4 py-6"><input type="number" value={m.w} onChange={e=>handleUpdateRow(m.id, 'w', e.target.value)} className="w-full bg-transparent border-none p-0 text-2xl font-black text-blue-800 focus:ring-0" /></td>
+                                                    <td className="px-4 py-6"><input type="number" value={m.h} onChange={e=>handleUpdateRow(m.id, 'h', e.target.value)} className="w-full bg-transparent border-none p-0 text-2xl font-black text-blue-800 focus:ring-0" /></td>
+                                                    <td className="px-4 py-6 bg-emerald-50/10 font-black text-emerald-600 text-4xl tracking-tighter text-center border-x">{m.dw}</td>
+                                                    <td className="px-4 py-6 bg-emerald-50/10 font-black text-emerald-600 text-4xl tracking-tighter text-center border-r">{m.dh}</td>
+                                                    <td className="px-4 py-6"><input type="number" value={m.t} onChange={e=>handleUpdateRow(m.id, 't', e.target.value)} className="w-full bg-transparent border-none p-0 text-2xl font-bold text-center focus:ring-0" /></td>
+                                                    <td className="px-8 py-6 flex flex-col gap-3">
+                                                        <div className="flex gap-3"><span className="badge">房間門</span><span className="badge">隱形門止</span></div>
+                                                        <input value={m.note} onChange={e=>handleUpdateRow(m.id, 'note', e.target.value)} className="w-full bg-transparent border-none p-0 text-sm text-slate-500 font-bold italic" placeholder="點此輸入備註..." />
                                                     </td>
-                                                    <td className="px-4 py-5 text-center"><button onClick={() => setMeasurements(measurements.filter(x=>x.id!==m.id))} className="text-slate-300 hover:text-red-500 p-2 transition-all"><i data-lucide="trash-2" className="w-5 h-5"></i></button></td>
+                                                    <td className="px-4 py-6 text-center"><button onClick={() => setMeasurements(measurements.filter(x=>x.id!==m.id))} className="text-slate-300 hover:text-red-500 transition-all opacity-0 group-hover:opacity-100"><Icon name="trash-2" className="w-7 h-7" /></button></td>
                                                 </tr>
                                             ))}
                                         </tbody>
@@ -540,40 +586,53 @@
                                 </div>
                             </div>
 
-                            <div className="card p-8 space-y-8">
-                                <h3 className="section-title">五金配件與備註 (四格版)</h3>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                                    <div className="space-y-4">
-                                        <div className="space-y-2"><label className="text-sm font-black text-blue-500 uppercase">框門注意事項</label><textarea rows="2" value={header.precautions} onChange={e=>setHeader({...header, precautions:e.target.value})} className="w-full bg-slate-50 border rounded-xl p-4 text-base font-bold resize-none" /></div>
-                                        <div className="space-y-2"><label className="text-sm font-black text-blue-500 uppercase">訂單備註</label><textarea rows="2" value={header.orderRemark} onChange={e=>setHeader({...header, orderRemark:e.target.value})} className="w-full bg-slate-50 border rounded-xl p-4 text-base font-bold resize-none" /></div>
+                            <div className="card p-10 space-y-10">
+                                <h3 className="section-title">五金配件與精密備註</h3>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+                                    <div className="space-y-6">
+                                        <div className="space-y-2"><label className="text-xs font-black text-blue-500 uppercase tracking-widest">框門注意事項</label><textarea rows="2" value={header.precautions} onChange={e=>setHeader({...header, precautions:e.target.value})} className="w-full bg-slate-50 border rounded-2xl p-5 text-xl font-bold resize-none" /></div>
+                                        <div className="space-y-2"><label className="text-xs font-black text-blue-500 uppercase tracking-widest">訂單備註</label><textarea rows="2" value={header.orderRemark} onChange={e=>setHeader({...header, orderRemark:e.target.value})} className="w-full bg-slate-50 border rounded-2xl p-5 text-xl font-bold resize-none" /></div>
                                     </div>
-                                    <div className="space-y-2"><label className="text-sm font-black text-red-500 italic">大紅字警示區</label><textarea rows="5" value={header.redNotice} onChange={e=>setHeader({...header, redNotice:e.target.value})} className="w-full bg-red-50/30 border border-red-100 rounded-xl p-4 text-red-600 font-black text-2xl text-center resize-none leading-relaxed" /></div>
+                                    <div className="space-y-2"><label className="text-xs font-black text-red-500 italic font-black uppercase tracking-widest">大紅字警示區</label><textarea rows="5" value={header.redNotice} onChange={e=>setHeader({...header, redNotice:e.target.value})} className="w-full bg-red-50/30 border border-red-100 rounded-[2.5rem] p-6 text-red-600 font-black text-4xl text-center resize-none leading-relaxed shadow-inner" /></div>
                                 </div>
-                                <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
+                                <div className="grid grid-cols-2 lg:grid-cols-4 gap-8">
                                     {['partCollision','partHinge','partStop','partHandle'].map((key, i) => (
-                                        <div key={key} className="bg-slate-50 p-5 rounded-2xl border border-slate-200">
-                                            <label className="text-sm font-black text-slate-400 mb-2 block">{['防撞條','鉸鏈','門止','把手'][i]}</label>
-                                            <textarea rows="4" value={header[key]} onChange={e=>setHeader({...header, [key]:e.target.value})} className="w-full bg-white border rounded-xl p-3 text-base font-bold outline-none resize-none text-center leading-loose" placeholder="換行對應網格" />
+                                        <div key={key} className="bg-slate-50 p-6 rounded-3xl border border-slate-200 shadow-sm">
+                                            <label className="text-xs font-black text-slate-400 mb-3 block uppercase tracking-widest">{['防撞條','鉸鏈','門止','把手'][i]}</label>
+                                            <textarea rows="4" value={header[key]} onChange={e=>setHeader({...header, [key]:e.target.value})} className="w-full bg-white border rounded-2xl p-4 text-2xl font-black outline-none resize-none text-center leading-loose text-slate-700 shadow-inner" placeholder="換行對應網格" />
                                         </div>
                                     ))}
+                                </div>
+                                <div className="flex justify-end gap-6 items-center pt-10 border-t border-slate-100">
+                                    <label className="text-2xl font-black text-slate-600">訂金金額 (Deposit):</label>
+                                    <input type="number" value={header.deposit} onChange={e=>setHeader({...header, deposit: e.target.value})} className="w-48 bg-slate-100 border-none p-5 rounded-2xl text-right font-black text-blue-600 text-4xl shadow-inner" />
                                 </div>
                             </div>
                         </main>
                     ) : (
                         <main className="p-4 lg:p-8 max-w-5xl mx-auto w-full">
                             <div className="card">
-                                <div className="p-6 bg-slate-900 text-white flex justify-between items-center"><h3 className="font-black italic uppercase text-lg">雲端歷史清單</h3></div>
+                                <div className="p-8 bg-slate-900 text-white flex justify-between items-center rounded-t-[2.5rem]"><h3 className="font-black italic uppercase text-2xl tracking-widest">雲端存檔歷史紀錄</h3><span className="bg-blue-600 px-4 py-1 rounded-full text-xs font-black">{allCases.length} 案存檔</span></div>
                                 <div className="divide-y divide-slate-100">
                                     {allCases.map(c => (
-                                        <div key={c.id} className="p-6 hover:bg-slate-50 transition-all flex justify-between items-center cursor-pointer group" onClick={() => loadCase(c)}>
-                                            <div><p className="text-blue-600 font-black text-2xl mb-1">{c.orderNo}</p><p className="text-base font-bold text-slate-500">{c.address}</p></div>
-                                            <div className="flex items-center gap-6"><button onClick={(e) => { e.stopPropagation(); setDeleteConfirm(c.orderNo); }} className="p-3 text-slate-400 hover:text-red-500 transition-all opacity-0 group-hover:opacity-100"><i data-lucide="trash-2" className="w-6 h-6"></i></button><i data-lucide="chevron-right" className="w-8 h-8 text-slate-300 group-hover:text-blue-500 transition-colors"></i></div>
+                                        <div key={c.id} className="p-8 hover:bg-slate-50 transition-all flex justify-between items-center cursor-pointer group" onClick={() => loadCase(c)}>
+                                            <div className="space-y-1">
+                                                <p className="text-blue-600 font-black text-3xl mb-1 tracking-tighter">{c.orderNo}</p>
+                                                <p className="text-xl font-bold text-slate-500">{c.address}</p>
+                                                <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mt-2">同步時間: {new Date(c.updatedAt).toLocaleString()}</p>
+                                            </div>
+                                            <div className="flex items-center gap-10">
+                                                <button onClick={(e) => { e.stopPropagation(); setDeleteConfirm(c.orderNo); }} className="p-4 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-2xl transition-all opacity-0 group-hover:opacity-100"><Icon name="trash-2" className="w-10 h-10" /></button>
+                                                <Icon name="chevron-right" className="w-12 h-12 text-slate-200 group-hover:text-blue-500 transition-colors" />
+                                            </div>
                                         </div>
                                     ))}
+                                    {allCases.length === 0 && <div className="p-32 text-center text-slate-300 font-black uppercase tracking-[0.5em] italic">No History Found</div>}
                                 </div>
                             </div>
                         </main>
                     )}
+                    <footer className="text-center py-10 opacity-20 text-[10px] font-black uppercase tracking-[0.8em] mt-auto">ZHIYANG PRO v14.0 - Official Admin</footer>
                 </div>
             );
         };
