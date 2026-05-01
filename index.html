@@ -28,17 +28,16 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, getDoc, deleteDoc, collection, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { getStorage, ref, uploadBytesResumable, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-storage.js";
         
-        window.FB = { initializeApp, getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken, getFirestore, doc, setDoc, getDoc, deleteDoc, collection, onSnapshot, getStorage, ref, uploadBytesResumable, getDownloadURL };
+        window.FB = { initializeApp, getAuth, signInAnonymously, onAuthStateChanged, getFirestore, doc, setDoc, getDoc, deleteDoc, collection, onSnapshot, getStorage, ref, uploadBytesResumable, getDownloadURL };
     </script>
 
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        // 安全圖示元件
         const Icon = ({ name, className }) => {
             const ref = useRef(null);
             useEffect(() => {
@@ -57,7 +56,7 @@
             return <span ref={ref} className="inline-flex items-center justify-center" />;
         };
 
-        const apiKey = ""; // 系統動態注入
+        const apiKey = ""; 
 
         const App = () => {
             const [view, setView] = useState("main"); 
@@ -71,7 +70,6 @@
             const [isRecording, setIsRecording] = useState(false);
             const [transcript, setTranscript] = useState("");
             const [mode, setMode] = useState("Cloud");
-            
             const [videoUrl, setVideoUrl] = useState(null); 
             const [uploadProgress, setUploadProgress] = useState(0); 
             const [deleteConfirm, setDeleteConfirm] = useState(null);
@@ -84,31 +82,21 @@
 
             const FIREBASE_APP_ID = 'od-survey-system';
 
-            const getTodayDateStr = () => {
-                const now = new Date();
-                return `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
-            };
-
             const [header, setHeader] = useState({
-                orderNo: getTodayDateStr(),
+                orderNo: new Date().toISOString().slice(0,10).replace(/-/g, ""),
                 address: "桃園市中壢區青商路419號14樓",
                 contact: "王廷羽", phone: "0923390718", surveyor: "教父", company: "歐德",
                 frameStyle: "同門片", doorStyle: "平烤正白",
                 precautions: "無", orderRemark: "無",
                 redNotice: "門下大陸 / 框工廠切\n多帶一組 一字門檔",
-                partCollision: "\n白色\n\n", 
-                partHinge: "\n銀色子母\n\n", 
-                partStop: "銀色\n隱形\n一字\n", 
-                partHandle: "黑色\n\n貝-WING\n",
-                deposit: "0",
-                videoLink: "" 
+                partCollision: "\n白色\n\n", partHinge: "\n銀色子母\n\n", partStop: "銀色\n隱形\n一字\n", partHandle: "黑色\n\n貝-WING\n",
+                deposit: "0", videoLink: "" 
             });
 
-            // 1. 初始化 Firebase 與 Auth
             useEffect(() => {
-                const init = async () => {
+                const initFirebase = async () => {
                     try {
-                        const firebaseConfig = {
+                        const config = {
                             apiKey: "AIzaSyBEcCQcuwCh30xDmj3wE-3CM2YffgIxfAk",
                             authDomain: "tao-men.firebaseapp.com",
                             projectId: "tao-men",
@@ -116,49 +104,38 @@
                             messagingSenderId: "332609297071",
                             appId: "1:332609297071:web:03593a930475c97b87525a"
                         };
-                        const app = window.FB.initializeApp(firebaseConfig);
+                        const app = window.FB.initializeApp(config);
                         const firestore = window.FB.getFirestore(app);
-                        const storageInstance = window.FB.getStorage(app);
+                        const st = window.FB.getStorage(app);
                         const auth = window.FB.getAuth(app);
                         
                         setDb(firestore);
-                        setStorage(storageInstance);
+                        setStorage(st);
 
-                        // 登入守衛
                         await window.FB.signInAnonymously(auth);
                         window.FB.onAuthStateChanged(auth, (u) => {
                             setUser(u);
-                            if (u) {
-                                setMode("Cloud");
-                                fetchHistory(firestore);
-                            }
+                            if (u) fetchHistory(firestore);
                         });
                         setIsReady(true);
-                    } catch (e) { 
-                        console.error("Firebase Init Error", e);
-                        setMode("Local");
-                        setIsReady(true); 
-                    }
+                    } catch (e) { setIsReady(true); setMode("Local"); }
                 };
-                init();
+                initFirebase();
                 getLogoBase64().then(url => setLogoImgBase64(url));
 
-                // 2. 語音辨識初始化
-                if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-                    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                if ('webkitSpeechRecognition' in window) {
+                    const SpeechRecognition = window.webkitSpeechRecognition;
                     recognitionRef.current = new SpeechRecognition();
                     recognitionRef.current.continuous = true; 
                     recognitionRef.current.interimResults = true; 
                     recognitionRef.current.lang = 'zh-TW';
                     recognitionRef.current.onresult = (e) => {
-                        let interim = "";
                         let finalStr = "";
                         for (let i = e.resultIndex; i < e.results.length; ++i) {
                             if (e.results[i].isFinal) finalStr += e.results[i][0].transcript;
-                            else interim += e.results[i][0].transcript;
                         }
                         if (finalStr) transcriptAccumulator.current += finalStr + " ";
-                        setTranscript(transcriptAccumulator.current + interim);
+                        setTranscript(transcriptAccumulator.current);
                     };
                     recognitionRef.current.onerror = () => setIsRecording(false);
                 }
@@ -172,28 +149,25 @@
             }, [isRecording]);
 
             const fetchHistory = (fdb) => {
-                if (!fdb) return;
                 const colRef = window.FB.collection(fdb, 'artifacts', FIREBASE_APP_ID, 'public', 'data', 'cases');
                 window.FB.onSnapshot(colRef, (snap) => {
                     const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                     setAllCases(list.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)));
-                }, (err) => console.error("Snapshot error", err));
+                });
             };
 
-            // 🚀 核心升級：AI 強大解析與帶入邏輯 (包含重試與暴力解析)
+            // 🚀 AI 解析與「強制入格」邏輯
             const parseSpeech = async (text) => {
                 if (!text.trim()) return;
                 setIsLoading(true);
                 
-                const systemPrompt = `你是一位丈量秘書。請將語音解析並回傳 JSON。
-                1. 提取到 address(地址), orderNo(編號), partHandle(把手), partCollision(防撞條), precautions(注意事項), note(清單備註) 等欄位。
-                2. 清單(items) 是陣列，包含 no, w(洞寬), h(洞高), t(牆厚), note。
-                3. 計算：門寬=洞寬-48, 門高=洞高-30。牆厚=主體。
-                
-                範例：{"header":{"address":"青商路"},"items":[{"no":"1.","w":898,"h":2190,"t":125}]}`;
+                const systemPrompt = `你是一位專業丈量秘書。請將內容轉為 JSON 格式。
+                1. 識別：address(地址), partHandle(把手), partCollision(防撞條), partStop(門止), partHinge(鉸鏈), redNotice(紅字), precautions(注意)。
+                2. 尺寸：items 陣列，包含 no(編號), w(寬), h(高), t(厚), note(備註)。
+                3. 自動計算：門寬=w-48, 門高=h-30。
+                格式範例：{"header":{"address":"...","partHandle":"..."},"items":[{"no":"1.","w":898,"h":2190,"t":125}]}`;
 
-                const delays = [1000, 2000, 4000, 8000, 16000];
-                const callAI = async (retryCount = 0) => {
+                const fetchWithRetry = async (retries = 0) => {
                     try {
                         const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
                             method: 'POST',
@@ -207,137 +181,195 @@
                         if (!resp.ok) throw new Error("API_FAIL");
                         return await resp.json();
                     } catch (err) {
-                        if (retryCount < 4) {
-                            await new Promise(r => setTimeout(r, delays[retryCount]));
-                            return callAI(retryCount + 1);
+                        if (retries < 3) {
+                            await new Promise(r => setTimeout(r, 1000 * Math.pow(2, retries)));
+                            return fetchWithRetry(retries + 1);
                         }
                         throw err;
                     }
                 };
 
                 try {
-                    const data = await callAI();
-                    const rawText = data.candidates[0].content.parts[0].text;
+                    const data = await fetchWithRetry();
+                    const raw = data.candidates[0].content.parts[0].text;
+                    const match = raw.match(/\{[\s\S]*\}/);
+                    if (!match) throw new Error("NO_JSON");
+                    const result = JSON.parse(match[0]);
                     
-                    // 🛡️ 暴力 JSON 提取：從整段文字挖出第一個 { 和最後一個 }
-                    const start = rawText.indexOf('{');
-                    const end = rawText.lastIndexOf('}');
-                    if (start === -1) throw new Error("NO_JSON");
-                    const result = JSON.parse(rawText.substring(start, end + 1));
-                    
-                    // 自動填入標頭
-                    if (result.header) {
-                        setHeader(prev => ({ ...prev, ...result.header }));
+                    if (result.header) setHeader(prev => ({ ...prev, ...result.header }));
+                    if (result.items) {
+                        setMeasurements(prev => {
+                            const newItems = result.items.map((i, idx) => ({
+                                id: Date.now() + Math.random(),
+                                no: i.no || (prev.length + idx + 1) + ".",
+                                w: parseInt(i.w) || 0, h: parseInt(i.h) || 0,
+                                dw: i.w ? i.w - 48 : 0, dh: i.h ? i.h - 30 : 0,
+                                t: parseInt(i.t) || 0, body: parseInt(i.t) || 0, trim: 50, note: i.note || ""
+                            }));
+                            const final = [...prev, ...newItems];
+                            syncToCloud(final);
+                            return final;
+                        });
                     }
-
-                    // 自動填入清單並同步雲端
-                    if (result.items && Array.isArray(result.items)) {
-                        const newRows = result.items.map((i, idx) => ({
-                            id: Date.now() + Math.random(),
-                            no: i.no || (measurements.length + idx + 1) + ".",
-                            w: parseInt(i.w) || 0, h: parseInt(i.h) || 0,
-                            dw: i.w ? i.w - 48 : 0, dh: i.h ? i.h - 30 : 0,
-                            t: parseInt(i.t) || 0, body: parseInt(i.t) || 0, trim: 50, note: i.note || ""
-                        }));
-                        const finalMeasurements = [...measurements, ...newRows];
-                        setMeasurements(finalMeasurements);
-                        
-                        // 雲端同步
-                        if (mode === "Cloud") {
-                            const docRef = window.FB.doc(db, 'artifacts', FIREBASE_APP_ID, 'public', 'data', 'cases', header.orderNo);
-                            await window.FB.setDoc(docRef, { ...header, ...result.header, items: finalMeasurements, updatedAt: new Date().toISOString() });
-                        }
-                    }
-                } catch (e) {
-                    console.error("AI Parse Error", e);
-                    alert("AI 秘書解析失敗。請嘗試：\n1. 網路是否穩定\n2. 講話速度放慢\n3. 手動輸入重要數據");
-                } finally {
-                    setIsLoading(false);
-                    transcriptAccumulator.current = "";
-                    setTranscript("");
-                }
+                } catch (e) { alert("AI 解析失敗，請檢查網路或手動輸入。"); }
+                finally { setIsLoading(false); transcriptAccumulator.current = ""; setTranscript(""); }
             };
 
             const toggleRecording = () => {
-                if (!recognitionRef.current) return alert("您的瀏覽器不支援語音辨識");
                 if (isRecording) {
                     recognitionRef.current.stop();
                     setIsRecording(false);
-                    if (transcriptAccumulator.current) parseSpeech(transcriptAccumulator.current);
+                    parseSpeech(transcriptAccumulator.current);
                 } else {
                     transcriptAccumulator.current = "";
                     setTranscript("");
                     recognitionRef.current.start();
                     setIsRecording(true);
-                    setTimer(0);
                 }
             };
 
-            const handleUpdateRow = (id, field, val) => {
-                setMeasurements(prev => prev.map(m => {
-                    if (m.id === id) {
-                        let u = { ...m, [field]: val };
-                        if (field === 'w') u.dw = val ? parseInt(val) - 48 : 0;
-                        if (field === 'h') u.dh = val ? parseInt(val) - 30 : 0;
-                        if (field === 't') u.body = val;
-                        return u;
+            // 🚀 恢復影片上傳功能
+            const handleVideoSelect = (e) => {
+                const file = e.target.files[0];
+                if (!file || !storage) return;
+                
+                const sRef = window.FB.ref(storage, `artifacts/${FIREBASE_APP_ID}/public/data/videos/${header.orderNo}_${Date.now()}`);
+                const task = window.FB.uploadBytesResumable(sRef, file);
+                
+                task.on('state_changed', 
+                    (s) => setUploadProgress((s.bytesTransferred / s.totalBytes) * 100),
+                    () => alert("影片上傳失敗"),
+                    async () => {
+                        const url = await window.FB.getDownloadURL(task.snapshot.ref);
+                        setHeader(prev => ({...prev, videoLink: url}));
+                        setUploadProgress(0);
+                        alert("✅ 影片同步完成");
                     }
-                    return m;
-                }));
+                );
             };
 
+            const syncToCloud = async (customItems = null) => {
+                if (!db || !header.orderNo) return;
+                const docRef = window.FB.doc(db, 'artifacts', FIREBASE_APP_ID, 'public', 'data', 'cases', header.orderNo);
+                await window.FB.setDoc(docRef, { ...header, items: customItems || measurements, updatedAt: new Date().toISOString() });
+            };
+
+            const exportExcel = async () => {
+                setIsLoading(true);
+                try {
+                    const wb = new window.ExcelJS.Workbook();
+                    const sh = wb.addWorksheet('下料單');
+                    sh.columns = [{ width: 8 }, { width: 10 }, { width: 10 }, { width: 10 }, { width: 10 }, { width: 8 }, { width: 8 }, { width: 8 }, { width: 30 }, { width: 7 }, { width: 7 }, { width: 7 }];
+                    const border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+
+                    sh.mergeCells('A2:A4');
+                    if (logoImgBase64) {
+                        const img = wb.addImage({ base64: logoImgBase64, extension: 'png' });
+                        sh.addImage(img, { tl: { col: 0, row: 1 }, br: { col: 1, row: 4 } });
+                    }
+                    sh.getCell('A2').border = border;
+
+                    sh.mergeCells('B2:H4');
+                    const tit = sh.getCell('B2'); tit.value = '下 料 單'; tit.font = { size: 24, bold: true }; tit.alignment = { vertical:'middle', horizontal:'center' };
+                    sh.getCell('I2').value = '訂單編號:'; sh.mergeCells('J2:L2'); sh.getCell('J2').value = header.orderNo;
+                    sh.getCell('I3').value = '丈量人員:'; sh.mergeCells('J3:L3'); sh.getCell('J3').value = header.surveyor;
+                    sh.getCell('I4').value = '丈量日期:'; sh.mergeCells('J4:L4'); sh.getCell('J4').value = header.date;
+
+                    const meta = [ {a:'公    司:', d:header.company}, {a:'聯 絡 人:', d:header.contact, g:'電話:', h:header.phone}, {a:'案場地址:', d:header.address} ];
+                    meta.forEach((m, i) => {
+                        const r = 5 + i; sh.mergeCells(`A${r}:C${r}`); sh.getCell(`A${r}`).value = m.a; sh.mergeCells(`D${r}:F${r}`); sh.getCell(`D${r}`).value = m.d;
+                        if(m.g) { sh.mergeCells(`G${r}:H${r}`); sh.getCell(`G${r}`).value = m.g; sh.mergeCells(`I${r}:L${r}`); sh.getCell(`I${r}`).value = m.h; }
+                        sh.getRow(r).eachCell(c => c.border = border);
+                    });
+                    sh.mergeCells('D7:L7'); sh.getCell('D7').value = header.address;
+
+                    sh.getRow(9).height = 30; sh.mergeCells('A9:B9'); sh.getCell('A9').value = "門框樣式:"; sh.mergeCells('C9:F9'); sh.getCell('C9').value = header.frameStyle;
+                    sh.mergeCells('G9:H9'); sh.getCell('G9').value = "門片樣式:"; sh.mergeCells('I9:L9'); sh.getCell('I9').value = header.doorStyle;
+                    ['A9','G9'].forEach(c => sh.getCell(c).fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FFFDE9D9'} });
+
+                    const hRow = sh.getRow(11); hRow.values = ['編號','洞寬','洞高','門寬','門高','牆厚','主體','線板','備註','樣式','門止','底'];
+                    hRow.eachCell(c => { c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFF2F2F2'}}; c.border=border; c.alignment={horizontal:'center'}; c.font={bold:true}; });
+
+                    let cur = 12;
+                    measurements.forEach(m => {
+                        const r = sh.getRow(cur++); r.values = [m.no, m.w, m.h, m.dw, m.dh, m.t, m.body, m.trim, m.note, "房", "隱", ""];
+                        r.eachCell(c => { c.border=border; c.alignment={horizontal:'center', vertical:'middle'}; if(c.column===9) c.font={color:{argb:'FFFF0000'}, bold:true}; });
+                    });
+
+                    const foot = cur + 1;
+                    sh.mergeCells(`A${foot}:D${foot}`); sh.getCell(`A${foot}`).value = "框門注意事項: " + header.precautions;
+                    sh.mergeCells(`E${foot}:L${foot}`); sh.getCell(`E${foot}`).value = "訂單備註: " + header.orderRemark;
+                    sh.getRow(foot).eachCell(c => { c.font={color:{argb:'FF0000FF'}, bold:true}; c.border=border; });
+
+                    const redR = foot + 1;
+                    sh.mergeCells(`A${redR}:D${redR+4}`); sh.getCell(`A${redR}`).value = header.address + "\n現場確認/門下大陸";
+                    sh.mergeCells(`E${redR}:L${redR+4}`); const redC = sh.getCell(`E${redR}`); redC.value = header.redNotice; redC.font={color:{argb:'FFFF0000'}, size:20, bold:true}; redC.alignment={vertical:'middle', horizontal:'center', wrapText:true};
+                    for(let r=redR; r<=redR+4; r++) for(let c=1; c<=12; c++) sh.getCell(r,c).border=border;
+
+                    const pR = redR + 5;
+                    const pN = ["防撞條", "鉸鏈", "門止", "把手"];
+                    const pV = [header.partCollision.split('\n'), header.partHinge.split('\n'), header.partStop.split('\n'), header.partHandle.split('\n')];
+                    pN.forEach((n, i) => { const c = i*2+5; sh.mergeCells(pR, c, pR, c+1); const h = sh.getCell(pR, c); h.value=n; h.alignment={horizontal:'center'}; h.font={bold:true}; });
+                    for(let row=1; row<=4; row++) { pV.forEach((lines, i) => { const c = i*2+5; sh.mergeCells(pR+row, c, pR+row, c+1); const v = sh.getCell(pR+row, c); v.value = lines[row-1] || ""; v.alignment={horizontal:'center', vertical:'middle'}; }); }
+                    for(let r=pR; r<=pR+4; r++) for(let c=1; c<=12; c++) sh.getCell(r,c).border=border;
+
+                    const buf = await wb.xlsx.writeBuffer();
+                    const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([buf])); link.download = `丈量尺寸單_${header.orderNo}.xlsx`; link.click();
+                } catch(e) { alert("導出失敗"); } finally { setIsLoading(false); }
+            };
+
+            const getTodayDateStr = () => new Date().toISOString().slice(0,10);
             const getLogoBase64 = async () => {
                 return new Promise((resolve) => {
-                    const canvas = document.createElement('canvas');
-                    canvas.width = 200; canvas.height = 200;
-                    const ctx = canvas.getContext('2d');
-                    ctx.fillStyle = 'white'; ctx.fillRect(0, 0, 200, 200);
-                    ctx.beginPath(); ctx.arc(100, 85, 70, 0, 2 * Math.PI);
-                    ctx.lineWidth = 14; ctx.strokeStyle = 'black'; ctx.stroke();
-                    ctx.font = '900 90px serif'; ctx.fillStyle = 'black';
-                    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('匠', 100, 95);
-                    ctx.font = '900 24px sans-serif'; ctx.fillText('門扉美學館', 100, 185);
+                    const canvas = document.createElement('canvas'); canvas.width = 200; canvas.height = 200;
+                    const ctx = canvas.getContext('2d'); ctx.fillStyle = 'white'; ctx.fillRect(0, 0, 200, 200);
+                    ctx.beginPath(); ctx.arc(100, 85, 70, 0, 2 * Math.PI); ctx.lineWidth = 14; ctx.strokeStyle = 'black'; ctx.stroke();
+                    ctx.font = '900 90px serif'; ctx.fillStyle = 'black'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('匠', 100, 95);
                     resolve(canvas.toDataURL('image/png'));
                 });
             };
 
-            const loadCase = (c) => { setHeader({ ...c }); setMeasurements(c.items || []); setVideoUrl(null); setView("main"); };
-
-            if (!isReady) return (
-                <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white">
-                    <Icon name="loader-2" className="animate-spin w-12 h-12 mb-4 text-blue-500" />
-                    <h1 className="font-black tracking-widest uppercase italic">丈量系統 啟動中...</h1>
-                </div>
-            );
+            if (!isReady) return <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white italic font-black text-3xl animate-pulse">系統加載中...</div>;
 
             return (
                 <div className="min-h-screen flex flex-col pb-20 relative">
                     <nav className="bg-slate-900 text-white p-5 shadow-xl sticky top-0 z-50 flex justify-between items-center">
                         <div className="flex items-center gap-3" onClick={() => setView("main")}>
                             {logoImgBase64 ? <div className="bg-white p-1 rounded-xl shadow-lg"><img src={logoImgBase64} className="w-10 h-10 object-contain" /></div> : <div className="bg-blue-600 p-2 rounded-xl"><Icon name="shield-check" className="w-7 h-7" /></div>}
-                            <div><h1 className="text-2xl font-black italic tracking-tighter uppercase leading-none">丈量尺寸</h1><span className="text-[10px] font-bold text-emerald-400 tracking-widest uppercase">{mode} Mode</span></div>
+                            <div><h1 className="text-2xl font-black italic uppercase leading-none tracking-tighter">丈量尺寸</h1><span className="text-[10px] font-bold text-emerald-400 tracking-widest uppercase">Official Pro</span></div>
                         </div>
                         <div className="flex gap-3">
                             <button onClick={() => setView(view === 'main' ? 'history' : 'main')} className="bg-slate-800 text-white px-5 py-3 rounded-2xl text-sm font-black flex items-center gap-2 active:scale-95 transition-all"><Icon name={view === 'main' ? "list" : "chevron-left"} className="w-5 h-5" /> {view === 'main' ? "紀錄" : "返回"}</button>
-                            <button onClick={() => parseSpeech(transcriptAccumulator.current)} className="bg-blue-600 text-white px-5 py-3 rounded-2xl text-sm font-black shadow-lg active:scale-95 transition-all">同步雲端</button>
+                            <button onClick={() => syncToCloud()} className="bg-blue-600 text-white px-5 py-3 rounded-2xl text-sm font-black shadow-lg active:scale-95 transition-all">手動同步</button>
                         </div>
                     </nav>
 
                     {view === "main" ? (
                         <main className="p-4 lg:p-8 max-w-7xl mx-auto w-full space-y-8">
+                            {/* 🚀 找回影片與導出按鈕 */}
                             <div className="card p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
-                                <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">訂單編號</label><input value={header.orderNo} onChange={e=>setHeader({...header, orderNo: e.target.value})} className="w-full border-b-2 p-1 text-2xl font-black text-blue-600 outline-none" /></div>
-                                <div className="lg:col-span-2 space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">案場地址 (可語音解析)</label><input value={header.address} onChange={e=>setHeader({...header, address: e.target.value})} className="w-full border-b-2 p-1 text-2xl font-bold outline-none" /></div>
-                                <div className="space-y-1 text-center"><label className="text-[10px] font-black text-red-500 uppercase">影片連動</label>
+                                <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">編號</label><input value={header.orderNo} onChange={e=>setHeader({...header, orderNo: e.target.value})} className="w-full border-b-2 p-1 text-2xl font-black text-blue-600 outline-none" /></div>
+                                <div className="lg:col-span-2 space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">案場地址</label><input value={header.address} onChange={e=>setHeader({...header, address: e.target.value})} className="w-full border-b-2 p-1 text-2xl font-bold outline-none" /></div>
+                                <div className="space-y-1 text-center"><label className="text-[10px] font-black text-red-500 uppercase tracking-widest">影片同步</label>
                                     <button onClick={()=>fileInputRef.current.click()} className="w-full bg-slate-50 py-3 rounded-2xl text-[10px] font-black border flex items-center justify-center gap-2 transition-all">
-                                        <Icon name="upload" className="w-5 h-5" /> 選取影片
+                                        {uploadProgress > 0 ? <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div> : (header.videoLink ? <Icon name="check-circle-2" className="w-5 h-5 text-emerald-500" /> : <Icon name="upload" className="w-5 h-5" />)}
+                                        {uploadProgress > 0 ? `${Math.round(uploadProgress)}%` : "選取錄影"}
                                     </button>
-                                    <input type="file" ref={fileInputRef} hidden accept="video/*" />
+                                    <input type="file" ref={fileInputRef} hidden accept="video/*" onChange={handleVideoSelect} />
                                 </div>
+                                <button onClick={exportExcel} className="bg-emerald-600 text-white py-3 rounded-2xl text-sm font-black shadow-lg mt-auto active:scale-95 transition-all"><Icon name="file-spreadsheet" className="w-6 h-6" /> 導出 EXCEL</button>
                             </div>
 
+                            {header.videoLink && (
+                                <div className="bg-black rounded-[2.5rem] overflow-hidden shadow-2xl aspect-video max-w-2xl mx-auto border-8 border-white relative group">
+                                    <video src={header.videoLink} controls className="w-full h-full object-cover"></video>
+                                    <button onClick={()=>{setHeader({...header, videoLink:''});}} className="absolute top-6 right-6 bg-white/20 hover:bg-red-500 text-white p-4 rounded-full backdrop-blur-md transition-all shadow-xl"><Icon name="trash-2" className="w-7 h-7" /></button>
+                                </div>
+                            )}
+
+                            {/* 🚀 AI 語音區：保持強力解析 */}
                             <div className="bg-slate-900 rounded-[3.5rem] p-12 text-center relative overflow-hidden shadow-2xl border-8 border-white">
-                                {isLoading && <div className="absolute inset-0 bg-slate-900/95 z-30 flex flex-col items-center justify-center"><Icon name="loader-2" className="animate-spin text-blue-500 w-20 h-20 mb-4" /><p className="text-blue-400 font-black tracking-widest text-lg animate-pulse uppercase italic">AI 正在自動帶入格子...</p></div>}
+                                {isLoading && <div className="absolute inset-0 bg-slate-900/95 z-30 flex flex-col items-center justify-center"><Icon name="loader-2" className="animate-spin text-blue-500 w-20 h-20 mb-4" /><p className="text-blue-400 font-black tracking-widest text-lg animate-pulse uppercase italic">AI 正在自動帶入數據...</p></div>}
                                 <button onClick={toggleRecording} className={`w-40 h-40 rounded-full flex items-center justify-center mx-auto transition-all border-[14px] border-slate-800 shadow-2xl ${isRecording ? 'record-pulse' : 'bg-white hover:scale-105'}`}>
                                     {isRecording ? <div className="w-12 h-12 bg-white rounded-xl"></div> : <Icon name="mic" className="w-20 h-20 text-slate-900" />}
                                 </button>
@@ -346,8 +378,8 @@
 
                             <div className="card overflow-hidden">
                                 <div className="p-6 bg-slate-50 border-b flex justify-between items-center bg-slate-50/80">
-                                    <h3 className="section-title italic">尺寸明細列表 ({measurements.length} 樘)</h3>
-                                    <button onClick={() => setMeasurements([...measurements, { id: Date.now(), no: (measurements.length+1)+".", w:0, h:0, dw:0, dh:0, t:0, note:"" }])} className="bg-indigo-600 text-white px-6 py-3 rounded-2xl text-sm font-black active:scale-95 transition-all">+ 手動新增</button>
+                                    <h3 className="section-title italic tracking-widest uppercase">丈量數據列表</h3>
+                                    <button onClick={() => setMeasurements([...measurements, { id: Date.now(), no: (measurements.length+1)+".", w:0, h:0, dw:0, dh:0, t:0, note:"" }])} className="bg-indigo-600 text-white px-6 py-3 rounded-2xl text-sm font-black shadow-lg">+ 手動新增</button>
                                 </div>
                                 <div className="overflow-x-auto no-scrollbar">
                                     <table className="w-full text-left min-w-[1100px] border-separate border-spacing-0">
@@ -358,12 +390,20 @@
                                             {measurements.map(m => (
                                                 <tr key={m.id} className="hover:bg-blue-50/20 group">
                                                     <td className="px-8 py-6 font-bold text-slate-400 text-xl italic">{m.no}</td>
-                                                    <td className="px-4 py-6"><input type="number" value={m.w} onChange={e=>handleUpdateRow(m.id, 'w', e.target.value)} className="w-full bg-transparent border-none p-0 text-2xl font-black text-blue-800 focus:ring-0" /></td>
-                                                    <td className="px-4 py-6"><input type="number" value={m.h} onChange={e=>handleUpdateRow(m.id, 'h', e.target.value)} className="w-full bg-transparent border-none p-0 text-2xl font-black text-blue-800 focus:ring-0" /></td>
+                                                    <td className="px-4 py-6"><input type="number" value={m.w} onChange={e=>{
+                                                        const val = parseInt(e.target.value) || 0;
+                                                        setMeasurements(measurements.map(x => x.id === m.id ? {...x, w:val, dw:val-48} : x));
+                                                    }} className="w-full bg-transparent border-none p-0 text-2xl font-black text-blue-800 focus:ring-0" /></td>
+                                                    <td className="px-4 py-6"><input type="number" value={m.h} onChange={e=>{
+                                                        const val = parseInt(e.target.value) || 0;
+                                                        setMeasurements(measurements.map(x => x.id === m.id ? {...x, h:val, dh:val-30} : x));
+                                                    }} className="w-full bg-transparent border-none p-0 text-2xl font-black text-blue-800 focus:ring-0" /></td>
                                                     <td className="px-4 py-6 bg-emerald-50/10 font-black text-emerald-600 text-4xl tracking-tighter text-center border-x">{m.dw}</td>
                                                     <td className="px-4 py-3 bg-emerald-50/10 font-black text-emerald-600 text-4xl tracking-tighter text-center border-r">{m.dh}</td>
-                                                    <td className="px-4 py-6"><input type="number" value={m.t} onChange={e=>handleUpdateRow(m.id, 't', e.target.value)} className="w-full bg-transparent border-none p-0 text-2xl font-bold text-center focus:ring-0" /></td>
-                                                    <td className="px-8 py-6"><input value={m.note} onChange={e=>handleUpdateRow(m.id, 'note', e.target.value)} className="w-full bg-transparent border-none p-0 text-sm text-slate-500 font-bold italic focus:ring-0" placeholder="點此輸入備註..." /></td>
+                                                    <td className="px-4 py-6"><input type="number" value={m.t} onChange={e=>{
+                                                        setMeasurements(measurements.map(x => x.id === m.id ? {...x, t:e.target.value, body:e.target.value} : x));
+                                                    }} className="w-full bg-transparent border-none p-0 text-2xl font-bold text-center focus:ring-0" /></td>
+                                                    <td className="px-8 py-6"><input value={m.note} onChange={e=>setMeasurements(measurements.map(x=>x.id===m.id?{...x, note:e.target.value}:x))} className="w-full bg-transparent border-none p-0 text-sm text-slate-500 font-bold italic focus:ring-0" /></td>
                                                     <td className="px-4 py-6 text-center"><button onClick={() => setMeasurements(measurements.filter(x=>x.id!==m.id))} className="text-slate-300 hover:text-red-500 transition-all opacity-0 group-hover:opacity-100 p-2"><Icon name="trash-2" className="w-6 h-6" /></button></td>
                                                 </tr>
                                             ))}
@@ -373,7 +413,7 @@
                             </div>
 
                             <div className="card p-10 space-y-10">
-                                <h3 className="section-title italic tracking-widest uppercase">五金配件與詳細備註</h3>
+                                <h3 className="section-title uppercase tracking-widest italic">五金配件與詳細備註 (語音自動帶入)</h3>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
                                     <div className="space-y-6">
                                         <div className="space-y-2"><label className="text-[10px] font-black text-blue-500 uppercase tracking-widest">注意事項</label><textarea rows="2" value={header.precautions} onChange={e=>setHeader({...header, precautions:e.target.value})} className="w-full bg-slate-50 border rounded-2xl p-5 text-xl font-bold resize-none" /></div>
@@ -385,7 +425,7 @@
                                     {['partCollision','partHinge','partStop','partHandle'].map((key, i) => (
                                         <div key={key} className="bg-slate-50 p-6 rounded-3xl border border-slate-200 shadow-sm">
                                             <label className="text-[10px] font-black text-slate-400 mb-3 block uppercase tracking-widest">{['防撞條','鉸鏈','門止','把手'][i]}</label>
-                                            <textarea rows="4" value={header[key]} onChange={e=>setHeader({...header, [key]:e.target.value})} className="w-full bg-white border rounded-2xl p-4 text-2xl font-black outline-none resize-none text-center leading-loose text-slate-700 shadow-inner" placeholder="AI 自動解析處" />
+                                            <textarea rows="4" value={header[key]} onChange={e=>setHeader({...header, [key]:e.target.value})} className="w-full bg-white border rounded-2xl p-4 text-2xl font-black outline-none resize-none text-center leading-loose text-slate-700 shadow-inner" placeholder="語音自動帶入" />
                                         </div>
                                     ))}
                                 </div>
@@ -398,7 +438,7 @@
                                 <div className="divide-y divide-slate-100">
                                     {allCases.map(c => (
                                         <div key={c.id} className="p-8 hover:bg-blue-50/30 transition-all flex justify-between items-center cursor-pointer group" onClick={() => loadCase(c)}>
-                                            <div className="space-y-1"><p className="text-blue-600 font-black text-3xl mb-1 tracking-tighter">[{c.orderNo}]</p><p className="text-xl font-bold text-slate-500">{c.address}</p><p className="text-[10px] text-slate-400 font-black uppercase mt-2 italic">Synced: {new Date(c.updatedAt).toLocaleString()}</p></div>
+                                            <div className="space-y-1"><p className="text-blue-600 font-black text-3xl mb-1 tracking-tighter">[{c.orderNo}]</p><p className="text-xl font-bold text-slate-500">{c.address}</p><p className="text-[10px] text-slate-400 font-black uppercase mt-2">同步時間: {new Date(c.updatedAt).toLocaleString()}</p></div>
                                             <Icon name="chevron-right" className="w-12 h-12 text-slate-200 group-hover:text-blue-500 transition-colors" />
                                         </div>
                                     ))}
