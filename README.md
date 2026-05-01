@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>歐德智慧丈量 - 智揚性能旗艦版</title>
     
-    <!-- 核心套件：確保絕對不空白的 CDN 載入 -->
+    <!-- 核心套件：確保絕對不空白 -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -24,12 +24,10 @@
         .virtual-list { max-height: 60vh; overflow-y: auto; }
         .shorthand-badge { background: #e0f2fe; color: #0369a1; font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: 900; }
         input:focus { border-color: #2563eb !important; outline: none; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1); }
-        .status-bar { transition: all 0.3s ease; }
     </style>
 </head>
 <body>
     <div id="root">
-        <!-- 初次加載畫面 -->
         <div class="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white">
             <div class="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
             <h2 class="text-xl font-black tracking-widest italic uppercase">智揚官方系統 啟動中</h2>
@@ -76,11 +74,11 @@
                 date: new Date().toISOString().split('T')[0]
             });
 
-            // 1. 初始化 Firebase 
             useEffect(() => {
                 const init = async () => {
                     try {
-                        const config = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+                        const configStr = typeof __firebase_config !== 'undefined' ? __firebase_config : '{}';
+                        const config = JSON.parse(configStr);
                         const app = window.FB.initializeApp(config);
                         const auth = window.FB.getAuth(app);
                         const firestore = window.FB.getFirestore(app);
@@ -101,21 +99,18 @@
                             if (u && header.orderNo) loadCloudData(firestore, aid, header.orderNo);
                         });
                     } catch (e) {
-                        console.error(e);
-                        setIsReady(true); // 即使出錯也進入本地模式
-                        setStatus({ type: 'error', msg: '雲端連線失敗，目前為本地模式' });
+                        setIsReady(true);
+                        setStatus({ type: 'error', msg: '雲端模式異常，目前為本地運作' });
                     }
                 };
-                setTimeout(init, 500); // 延遲確保 SDK 載入
+                setTimeout(init, 500);
             }, []);
 
-            // 智揚換算：寬-48, 高-30
             const calc = (v, offset) => {
                 const n = parseInt(v) || 0;
                 return n > 0 ? n - offset : 0;
             };
 
-            // 2. 雲端資料操作
             const loadCloudData = async (fdb, aid, oNo) => {
                 if (!fdb || !oNo) return;
                 setIsLoading(true);
@@ -140,11 +135,10 @@
                         items: itemsToSave,
                         lastUpdate: new Date().toISOString()
                     });
-                    setStatus({ type: 'success', msg: '官方後台已同步' });
+                    setStatus({ type: 'success', msg: '官方後台同步成功' });
                 } catch (e) { setStatus({ type: 'error', msg: '同步失敗' }); }
             };
 
-            // 3. 語音解析 (支援 300+ 筆批次報數)
             const handleRecording = async () => {
                 if (isRecording) {
                     mediaRecorder.current.stop();
@@ -162,7 +156,7 @@
                         setIsRecording(true);
                         setTimer(0);
                         timerRef.current = setInterval(() => setTimer(p => p + 1), 1000);
-                        setStatus({ type: 'info', msg: '正在聆聽數據 (支援斜線快速格式)...' });
+                        setStatus({ type: 'info', msg: '聆聽中 (支援斜線快速報法)...' });
                     } catch (e) { alert("麥克風被拒絕"); }
                 }
             };
@@ -184,7 +178,7 @@
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
-                                contents: [{ parts: [{ text: "解析這段錄音：" }, { inlineData: { mimeType: "audio/webm", data: base64 } }] }],
+                                contents: [{ parts: [{ text: "解析錄音數據：" }, { inlineData: { mimeType: "audio/webm", data: base64 } }] }],
                                 systemInstruction: { parts: [{ text: prompt }] },
                                 generationConfig: { responseMimeType: "application/json" }
                             })
@@ -204,12 +198,11 @@
                             setMeasurements(updated);
                             syncToCloud(updated);
                         }
-                    } catch (e) { setStatus({ type: 'error', msg: '解析超時，建議分段報數' }); }
+                    } catch (e) { setStatus({ type: 'error', msg: '解析超時' }); }
                     finally { setIsLoading(false); }
                 };
             };
 
-            // 4. 功能函數
             const addManualRow = () => {
                 const newRow = { id: Date.now(), no: (measurements.length + 1) + ".", w: 0, h: 0, dw: 0, dh: 0, t: 0, body: 0, trim: 50, style: "房", stop: "隱", note: "" };
                 setMeasurements(prev => [...prev, newRow]);
@@ -238,14 +231,47 @@
                 setStatus({ type: 'success', msg: '備份檔已生成，請上傳至 Synology Drive' });
             };
 
+            // 核心：Excel 指定格式導出邏輯
+            const exportSpecificExcel = () => {
+                if (measurements.length === 0) return alert("尚無丈量數據");
+                
+                // 依照範本格位精確建構 CSV 陣列
+                const rows = [
+                    [,,,, "下料單",,,, "訂單編號：",, header.orderNo, "", "", "", "", "", ""],
+                    [,,,,,,,, "丈量人員：",, header.surveyor, "", "", "", "", "", ""],
+                    ["公        司：        ", "", "", header.company, "", "", "", "", "丈量日期：",, header.date, "", "", "", "", "房", "崁", "高-32"],
+                    ["聯  絡  人：        ", "", "", header.contact, "", "電話:", header.phone, "", "", "", "", "", "", "", "", "房", "隱", ""],
+                    ["案場地址：", "", "", header.address, "", "", "", "", "", "", "", "", "", "", "", "房", "吸", ""],
+                    [,,,,,,,,,,,,,,,, "浴", "一", ""],
+                    [`"門框\n樣式:"`, "", "同門片", "", "", "", `"門片\n樣式:  "`, "平烤正白", "", "", "", "", "", "", "", "", ""],
+                    ["編號", "", "洞寬", "洞高", "門寬", "門高", "牆厚", "主體", "線板", "備註", "", "", "樣式", "門止", "底"]
+                ];
+
+                measurements.forEach(m => {
+                    rows.push([
+                        m.no, "", m.w, m.h, m.dw, m.dh, m.t, m.body, m.trim, m.note, "", "", m.style, m.stop, ""
+                    ]);
+                });
+
+                const csvContent = "\ufeff" + rows.map(r => r.join(",")).join("\n");
+                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                const link = document.createElement("a");
+                link.href = URL.createObjectURL(blob);
+                link.download = `尺寸單_${header.contact}_${header.orderNo}.csv`;
+                link.click();
+                setStatus({ type: 'success', msg: '已按官方格式導出尺寸單' });
+            };
+
             const filteredItems = useMemo(() => {
                 if (!searchTerm) return measurements;
                 return measurements.filter(m => m.no.includes(searchTerm) || m.note.includes(searchTerm));
             }, [measurements, searchTerm]);
 
-            useEffect(() => { lucide.createIcons(); }, [measurements, isRecording, videoUrl, isReady, status]);
+            useEffect(() => { 
+                if (isReady) setTimeout(() => lucide.createIcons(), 100); 
+            }, [measurements, isRecording, videoUrl, isReady, status]);
 
-            if (!isReady) return null; // 顯示加載畫面
+            if (!isReady) return null;
 
             return (
                 <div className="min-h-screen flex flex-col">
@@ -262,11 +288,11 @@
                             </div>
                         </div>
                         <div className="flex gap-2">
-                            <button onClick={backupToSynology} className="bg-white/10 hover:bg-white/20 border border-white/10 px-3 py-2 rounded-xl text-[10px] font-black transition flex items-center gap-1">
+                            <button onClick={backupToSynology} className="bg-white/10 hover:bg-white/20 border border-white/10 px-3 py-1.5 rounded-xl text-[10px] font-black transition flex items-center gap-1">
                                 <i data-lucide="database" className="w-3 h-3 text-amber-400"></i> NAS 備份
                             </button>
-                            <button onClick={() => syncToCloud()} className="bg-blue-600 hover:bg-blue-700 px-3 py-2 rounded-xl text-[10px] font-black shadow-lg transition flex items-center gap-1">
-                                <i data-lucide="cloud" className="w-3 h-3"></i> 雲端存檔
+                            <button onClick={exportSpecificExcel} className="bg-emerald-600 hover:bg-emerald-700 px-4 py-1.5 rounded-xl text-[10px] font-black shadow-lg transition flex items-center gap-1">
+                                <i data-lucide="file-spreadsheet" className="w-3 h-3"></i> 導出 EXCEL
                             </button>
                         </div>
                     </nav>
@@ -275,7 +301,7 @@
                         {/* Header Info */}
                         <div className="bg-white rounded-[2.5rem] p-8 shadow-sm border border-slate-200 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 relative">
                             <div className="space-y-1">
-                                <label className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">案場編號 / {measurements.length} 樘</label>
+                                <label className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">訂單編號 / {measurements.length} 樘</label>
                                 <div className="flex gap-1">
                                     <input value={header.orderNo} onBlur={() => loadCloudData(db, appId, header.orderNo)} onChange={e=>setHeader({...header, orderNo: e.target.value})} className="w-full border-b-2 border-slate-100 p-1 text-sm font-black text-blue-600 outline-none" />
                                     <button onClick={() => loadCloudData(db, appId, header.orderNo)} className="p-1 text-blue-600"><i data-lucide="refresh-cw" className="w-4 h-4"></i></button>
@@ -319,7 +345,7 @@
                                 </div>
                             </div>
 
-                            <div className="text-white/10 font-mono text-7xl mb-8 tracking-tighter">
+                            <div className="text-white/10 font-mono text-7xl mb-10 tracking-tighter">
                                 {Math.floor(timer/60).toString().padStart(2,'0')}:{(timer%60).toString().padStart(2,'0')}
                             </div>
                             
@@ -337,7 +363,7 @@
                                     <i data-lucide="search" className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"></i>
                                     <input placeholder="搜索編號或備註..." value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold outline-none focus:border-blue-500" />
                                 </div>
-                                <button onClick={addManualRow} className="bg-indigo-600 text-white px-6 py-2.5 rounded-2xl text-xs font-black hover:bg-indigo-700 transition shadow-lg shadow-indigo-100">+ 手動新增項目</button>
+                                <button onClick={addManualRow} className="bg-indigo-600 text-white px-6 py-2.5 rounded-2xl text-xs font-black hover:bg-indigo-700 transition shadow-lg shadow-indigo-200">+ 手動新增項目</button>
                             </div>
                             
                             <div className="overflow-x-auto virtual-list">
@@ -388,7 +414,7 @@
                     </main>
 
                     <footer className="text-center py-10 opacity-30 text-[10px] font-black uppercase tracking-[0.5em] mt-auto">
-                        Official Synology Linked Engine v13.0
+                        Official Synology Linked Engine v13.5
                     </footer>
                 </div>
             );
