@@ -4,206 +4,184 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>智揚下料單 - 師傅查看器</title>
-    
-    <!-- 核心套件 -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
-
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700;900&display=swap');
-        body { font-family: 'Noto Sans TC', sans-serif; background-color: #f8fafc; -webkit-tap-highlight-color: transparent; }
-        .data-card { background: white; border-radius: 2rem; border: 1px solid #e2e8f0; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); }
-        .sticky-col { position: sticky; left: 0; background: white; z-index: 10; border-right: 2px solid #f1f5f9; }
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700;900&family=Noto+Serif+TC:wght@900&display=swap');
+        body { font-family: 'Noto Sans TC', sans-serif; background-color: #f8fafc; }
         .no-scrollbar::-webkit-scrollbar { display: none; }
+        input:focus { border-color: #2563eb !important; outline: none; }
     </style>
 </head>
-<body>
-    <div id="root">
-        <!-- 初始安全加載畫面 -->
-        <div class="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-white">
-            <div class="w-12 h-12 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-            <h2 class="text-xl font-black tracking-widest uppercase italic text-emerald-400">Zhiyang Viewer 啟動中</h2>
-            <p class="text-slate-500 text-[10px] mt-2 uppercase tracking-[0.2em]">Safety Cloud Linking...</p>
-        </div>
-    </div>
+<body class="pb-10">
 
-    <!-- Firebase SDK -->
+    <div id="root"></div>
+
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-        
-        const firebaseConfig = {
-            apiKey: "AIzaSyBEcCQcuwCh30xDmj3wE-3CM2YffgIxfAk",
-            authDomain: "tao-men.firebaseapp.com",
-            projectId: "tao-men",
-            storageBucket: "tao-men.firebasestorage.app",
-            messagingSenderId: "332609297071",
-            appId: "1:332609297071:web:03593a930475c97b87525a",
-            measurementId: "G-0RHTM7DV4Z"
-        };
-
-        window.FB = { initializeApp, getAuth, signInAnonymously, onAuthStateChanged, getFirestore, doc, getDoc, firebaseConfig };
+        window.FB = { initializeApp, getAuth, signInAnonymously, getFirestore, doc, getDoc };
     </script>
 
     <script type="text/babel">
         const { useState, useEffect } = React;
-
         const App = () => {
             const [isReady, setIsReady] = useState(false);
             const [db, setDb] = useState(null);
             const [searchNo, setSearchNo] = useState("");
             const [caseData, setCaseData] = useState(null);
             const [isLoading, setIsLoading] = useState(false);
-            const [mode, setMode] = useState("Checking");
 
-            // 強制啟動機制：1.5 秒內不論雲端狀態如何都進入查詢畫面
             useEffect(() => {
-                const forceStart = setTimeout(() => {
-                    if (!isReady) { setIsReady(true); setMode("Local Mode"); }
-                }, 1500);
-
-                const setup = async () => {
+                const init = async () => {
+                    // Firebase 配置需與 index.html 相同
+                    const firebaseConfig = { 
+                        apiKey: "AIzaSyBEcCQcuwCh30xDmj3wE-3CM2YffgIxfAk", 
+                        authDomain: "tao-men.firebaseapp.com", 
+                        projectId: "tao-men", 
+                        storageBucket: "tao-men.firebasestorage.app", 
+                        messagingSenderId: "332609297071", 
+                        appId: "1:332609297071:web:03593a930475c97b87525a" 
+                    };
                     try {
-                        if (window.FB) {
-                            const app = window.FB.initializeApp(window.FB.firebaseConfig);
-                            const auth = window.FB.getAuth(app);
-                            const firestore = window.FB.getFirestore(app);
-                            setDb(firestore);
-
-                            await window.FB.signInAnonymously(auth);
-                            window.FB.onAuthStateChanged(auth, (u) => {
-                                setMode("Cloud Mode");
-                                setIsReady(true);
-                                clearTimeout(forceStart);
-                            });
-                        }
-                    } catch (e) {
-                        setMode("Local Mode"); setIsReady(true);
-                    }
+                        const app = window.FB.initializeApp(firebaseConfig);
+                        const firestore = window.FB.getFirestore(app);
+                        setDb(firestore);
+                        await window.FB.signInAnonymously(window.FB.getAuth(app));
+                        setIsReady(true);
+                    } catch (e) { setIsReady(true); }
                 };
-                setup();
+                init();
             }, []);
 
             const handleSearch = async () => {
                 if (!searchNo) return;
                 setIsLoading(true);
                 try {
-                    // 使用您在主程式中相同的路徑
-                    const docRef = window.FB.doc(db, 'artifacts', 'od-app', 'public', 'data', 'cases', searchNo);
+                    const appId = 'od-survey-system'; // 需與管理員端 appId 一致
+                    const docRef = window.FB.doc(db, 'artifacts', appId, 'public', 'data', 'cases', searchNo);
                     const snap = await window.FB.getDoc(docRef);
                     if (snap.exists()) {
                         setCaseData(snap.data());
                     } else {
-                        alert("找不到此訂單編號，請確認您已在管理員端同步雲端。");
+                        alert("找不到此案場，請確認編號是否正確。");
                     }
-                } catch (e) {
-                    alert("查詢失敗，可能是雲端庫尚未開通（權限或帳單問題）。");
-                } finally {
-                    setIsLoading(false);
-                }
+                } catch (e) { alert("讀取失敗"); }
+                finally { setIsLoading(false); }
             };
 
             useEffect(() => { if(isReady) lucide.createIcons(); }, [caseData, isReady]);
 
-            if (!isReady) return null;
+            if (!isReady) return (
+                <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white italic font-black text-2xl uppercase">
+                    系統連線中...
+                </div>
+            );
 
             return (
                 <div className="min-h-screen bg-slate-50 flex flex-col pb-10">
-                    <nav className="bg-slate-900 text-white p-4 shadow-xl flex justify-between items-center sticky top-0 z-50">
-                        <div className="flex items-center gap-2">
-                            <div className="bg-emerald-600 p-1.5 rounded-lg shadow-lg"><i data-lucide="eye" className="w-5 h-5 text-white"></i></div>
-                            <div>
-                                <h1 className="text-lg font-black italic tracking-tighter uppercase">智揚 <span className="text-emerald-400 text-sm">Viewer</span></h1>
-                                <p className="text-[7px] text-slate-500 font-bold tracking-widest uppercase leading-none mt-1">{mode}</p>
-                            </div>
+                    <nav className="bg-slate-900 text-white p-5 shadow-xl sticky top-0 z-50">
+                        <div className="max-w-5xl mx-auto flex justify-between items-center">
+                            <h1 className="text-2xl font-black italic tracking-tighter uppercase">
+                                智揚 <span className="text-blue-400 text-lg not-italic">師傅端</span>
+                            </h1>
+                            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest border border-slate-800 px-2 py-1 rounded">Read Only</span>
                         </div>
-                        <span className="text-[10px] font-black text-slate-500 border border-white/5 px-2 py-1 rounded uppercase tracking-widest">師傅唯讀版</span>
                     </nav>
 
                     <main className="p-4 lg:p-8 max-w-5xl mx-auto w-full space-y-6">
-                        {/* 查詢區 */}
-                        <div className="bg-white rounded-[2rem] p-8 shadow-sm border border-slate-200 text-center space-y-4">
-                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block font-bold">請輸入訂單編號</label>
+                        {/* 查詢區域 */}
+                        <div className="bg-white rounded-[2rem] p-8 shadow-sm border text-center space-y-4">
+                            <label className="text-sm font-black text-slate-400 uppercase font-bold tracking-widest block">請輸入訂單編號查詢尺寸</label>
                             <div className="flex gap-2 max-w-md mx-auto">
                                 <input 
-                                    placeholder="例如: 20260412" 
+                                    placeholder="例如: 20260502" 
                                     value={searchNo} 
                                     onChange={e=>setSearchNo(e.target.value)} 
-                                    onKeyDown={e=>e.key==='Enter'&&handleSearch()}
-                                    className="flex-1 px-5 py-3 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-black text-indigo-600 outline-none focus:bg-white focus:border-blue-500 transition-all shadow-inner" 
+                                    onKeyDown={e=>e.key==='Enter'&&handleSearch()} 
+                                    className="flex-1 px-5 py-4 bg-slate-50 border rounded-2xl text-xl font-black text-indigo-600 outline-none" 
                                 />
                                 <button 
                                     onClick={handleSearch} 
                                     disabled={isLoading} 
-                                    className="bg-slate-900 text-white px-8 py-3 rounded-2xl font-black text-sm transition-all active:scale-95 disabled:opacity-50"
+                                    className="bg-slate-900 text-white px-8 py-4 rounded-2xl font-black text-lg transition-all active:scale-95 flex items-center gap-2"
                                 >
-                                    {isLoading ? <i data-lucide="loader-2" className="animate-spin w-5 h-5"></i> : "查詢"}
+                                    {isLoading ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : <i data-lucide="search" className="w-5 h-5"></i>}
+                                    查詢
                                 </button>
                             </div>
                         </div>
-
-                        {caseData ? (
-                            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                                {/* 案場資訊 */}
-                                <div className="data-card p-8 grid grid-cols-1 md:grid-cols-2 gap-6 relative overflow-hidden">
-                                    <div className="absolute top-0 right-0 p-4 bg-emerald-50 rounded-bl-3xl">
-                                        <i data-lucide="check-check" className="w-6 h-6 text-emerald-500"></i>
-                                    </div>
+                        
+                        {caseData && (
+                            <div className="space-y-6 animate-in fade-in duration-500">
+                                {/* 案場簡介 */}
+                                <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border grid grid-cols-1 md:grid-cols-2 gap-6">
                                     <div className="space-y-4">
                                         <div>
-                                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">安裝地址</label>
-                                            <p className="font-bold text-slate-700 text-lg leading-tight">{caseData.address}</p>
+                                            <label className="text-sm font-black text-slate-400 uppercase tracking-widest">案場地址</label>
+                                            <p className="font-bold text-slate-700 text-2xl leading-tight mt-1">{caseData.address}</p>
                                         </div>
-                                        <div>
-                                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">客戶資訊</label>
-                                            <p className="font-bold text-slate-700">{caseData.contact} / {caseData.phone}</p>
+                                        <div className="flex gap-6">
+                                            <div>
+                                                <label className="text-xs font-black text-slate-400 uppercase">聯絡人</label>
+                                                <p className="font-bold text-slate-600">{caseData.contact}</p>
+                                            </div>
+                                            <div>
+                                                <label className="text-xs font-black text-slate-400 uppercase">丈量日期</label>
+                                                <p className="font-bold text-slate-600">{caseData.date}</p>
+                                            </div>
                                         </div>
                                     </div>
                                     <div className="bg-slate-50 p-6 rounded-3xl flex justify-between items-center border border-slate-100">
-                                        <div className="text-right flex-1 pr-4 border-r border-slate-200">
-                                            <label className="text-[10px] font-black text-slate-400 uppercase">總樘數</label>
-                                            <p className="text-3xl font-black text-blue-600 tracking-tighter">{caseData.items?.length || 0} <span className="text-xs">樘</span></p>
-                                        </div>
-                                        <div className="pl-4">
-                                            <label className="text-[10px] font-black text-slate-400 uppercase">同步日期</label>
-                                            <p className="text-[10px] font-bold text-slate-500">{new Date(caseData.updatedAt || Date.now()).toLocaleDateString()}</p>
+                                        <div className="text-right">
+                                            <label className="text-sm font-black text-slate-400 uppercase">總樘數</label>
+                                            <p className="text-6xl font-black text-blue-600 tracking-tighter">{caseData.items?.length || 0} <span className="text-lg">樘</span></p>
                                         </div>
                                     </div>
                                 </div>
 
-                                {/* 尺寸明細表 */}
+                                {/* 影片區區塊 (如果管理員有提供連結) */}
+                                {caseData.videoLink && (
+                                    <div className="bg-black rounded-[2.5rem] overflow-hidden shadow-2xl aspect-video max-w-4xl mx-auto border-8 border-white relative">
+                                        <video src={caseData.videoLink} controls className="w-full h-full object-cover"></video>
+                                    </div>
+                                )}
+
+                                {/* 尺寸列表 */}
                                 <div className="bg-white rounded-[2rem] border border-slate-200 overflow-hidden shadow-lg overflow-x-auto no-scrollbar">
-                                    <table className="w-full text-left min-w-[800px] border-separate border-spacing-0">
-                                        <thead>
-                                            <tr className="bg-slate-900 text-[10px] text-slate-400 font-black uppercase tracking-widest">
-                                                <th className="px-6 py-5 sticky-col bg-slate-900 text-white">編號</th>
-                                                <th className="px-4 py-5 text-emerald-400 bg-emerald-950/20 text-center font-black">門寬 (-48)</th>
-                                                <th className="px-4 py-5 text-emerald-400 bg-emerald-950/20 text-center font-black border-r border-emerald-900/10">門高 (-30)</th>
-                                                <th className="px-4 py-5 font-black text-white bg-slate-800 text-center">牆厚 (T)</th>
-                                                <th className="px-6 py-5 font-black text-white bg-slate-800">樣式 / 備註</th>
+                                    <table className="w-full text-left min-w-[1000px] border-separate border-spacing-0">
+                                        <thead className="bg-slate-900 text-sm text-white font-black uppercase tracking-widest">
+                                            <tr>
+                                                <th className="px-6 py-6">編號</th>
+                                                <th className="px-4 py-6 text-blue-400">門寬 (成品)</th>
+                                                <th className="px-4 py-6 text-blue-400">門高 (成品)</th>
+                                                <th className="px-4 py-6">牆厚</th>
+                                                <th className="px-6 py-6">現場備註</th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-slate-100">
                                             {caseData.items?.map((m, i) => (
-                                                <tr key={i} className="hover:bg-slate-50 transition-all group">
-                                                    <td className="px-6 py-6 font-bold text-slate-400 text-sm sticky-col group-hover:bg-slate-50">{m.no}</td>
-                                                    <td className="px-4 py-6 font-black text-emerald-600 text-2xl text-center tracking-tighter">{m.dw}</td>
-                                                    <td className="px-4 py-6 font-black text-emerald-600 text-2xl text-center tracking-tighter border-r border-slate-50">{m.dh}</td>
-                                                    <td className="px-4 py-6 font-bold text-slate-700 text-lg text-center">{m.t}</td>
-                                                    <td className="px-6 py-6">
+                                                <tr key={i} className="hover:bg-blue-50/40 transition-all">
+                                                    <td className="px-6 py-8 font-bold text-slate-400 text-xl">{m.no}</td>
+                                                    <td className="px-4 py-8 font-black text-blue-600 text-5xl tracking-tighter">
+                                                        {m.dw}
+                                                    </td>
+                                                    <td className="px-4 py-8 font-black text-blue-600 text-5xl tracking-tighter">
+                                                        {m.dh}
+                                                    </td>
+                                                    <td className="px-4 py-8 font-bold text-slate-700 text-3xl">
+                                                        {m.t}
+                                                    </td>
+                                                    <td className="px-6 py-8">
                                                         <div className="flex gap-2 mb-2">
-                                                            <span className="bg-blue-50 text-blue-700 px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest">{m.style}</span>
-                                                            <span className="bg-slate-100 text-slate-500 px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest">隱止</span>
+                                                            <span className="bg-blue-50 text-blue-700 px-2 py-1 rounded text-xs font-black">{m.style}</span>
+                                                            <span className="bg-slate-100 text-slate-500 px-2 py-1 rounded text-xs font-black">隱止</span>
                                                         </div>
-                                                        {m.note && (
-                                                            <p className="text-xs text-red-600 font-black italic tracking-tighter bg-red-50 p-2 rounded-lg border border-red-100 inline-block">
-                                                                {m.note}
-                                                            </p>
-                                                        )}
+                                                        <p className="text-lg text-red-600 font-black italic">{m.note || "無備註"}</p>
                                                     </td>
                                                 </tr>
                                             ))}
@@ -211,20 +189,15 @@
                                     </table>
                                 </div>
                             </div>
-                        ) : (
-                            !isLoading && (
-                                <div className="text-center py-24 opacity-20">
-                                    <i data-lucide="search" className="w-16 h-16 mx-auto mb-4"></i>
-                                    <p className="font-black italic tracking-widest uppercase">請輸入正確編號查詢數據</p>
-                                </div>
-                            )
                         )}
                     </main>
-                    <footer className="mt-auto py-10 text-center opacity-30 text-[10px] font-black uppercase tracking-[0.5em]">Zhiyang Viewer v25.0 - Final Craftman Edition</footer>
+
+                    <footer className="mt-auto py-10 text-center opacity-20 text-[10px] font-black uppercase tracking-[0.5em]">
+                        Zhiyang Worker Viewer v12.0
+                    </footer>
                 </div>
             );
         };
-
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<App />);
     </script>
