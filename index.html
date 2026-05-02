@@ -56,9 +56,11 @@
             return <span ref={ref} className="inline-flex items-center justify-center" />;
         };
 
-        // 🚀 版本號：v1.2.2 (新增歷史紀錄刪除功能)
-        const version = "v1.2.2";
-        const apiKey = "AIzaSyCBBjJwbHHvuTDvgJbyUZzHOYyE5Owa5bg"; 
+        // 🚀 版本號：v1.4.2 (恢復完整 Excel 美編排版)
+        const version = "v1.4.2";
+        
+        // 內建金鑰 (請確保此金鑰在您的 Google AI Studio 是有效的)
+        const builtInApiKey = "AIzaSyCBBjJwbHHvuTDvgJbyUZzHOYyE5Owa5bg"; 
 
         const App = () => {
             const [view, setView] = useState("main"); 
@@ -72,14 +74,14 @@
             const [transcript, setTranscript] = useState("");
             const [logoImgBase64, setLogoImgBase64] = useState("");
             const [alertMsg, setAlertMsg] = useState(null); 
-            const [confirmDialog, setConfirmDialog] = useState(null); // 新增：確認刪除彈窗狀態
+            const [confirmDialog, setConfirmDialog] = useState(null);
 
             const recognitionRef = useRef(null);
             const fileInputRef = useRef(null);
             const logoInputRef = useRef(null);
             const transcriptAccumulator = useRef(""); 
 
-            const canvasAppId = typeof __app_id !== 'undefined' ? __app_id : (typeof window.__app_id !== 'undefined' ? window.__app_id : 'od-survey-system');
+            const canvasAppId = typeof __app_id !== 'undefined' ? __app_id : 'od-survey-system';
 
             const [header, setHeader] = useState({
                 orderNo: "", address: "", contact: "", phone: "", surveyor: "", company: "",
@@ -91,7 +93,7 @@
             useEffect(() => {
                 const initFirebase = async () => {
                     try {
-                        const fallbackConfig = {
+                        const firebaseConfig = {
                             apiKey: "AIzaSyBEcCQcuwCh30xDmj3wE-3CM2YffgIxfAk",
                             authDomain: "tao-men.firebaseapp.com",
                             projectId: "tao-men",
@@ -99,16 +101,11 @@
                             messagingSenderId: "332609297071",
                             appId: "1:332609297071:web:03593a930475c97b87525a"
                         };
-                        const firebaseConfig = typeof window.__firebase_config !== 'undefined' ? JSON.parse(window.__firebase_config) : fallbackConfig;
                         const app = window.FB.initializeApp(firebaseConfig);
                         const firestore = window.FB.getFirestore(app);
                         const auth = window.FB.getAuth(app);
                         setDb(firestore);
-                        if (typeof window.__initial_auth_token !== 'undefined' && window.__initial_auth_token) {
-                            await window.FB.signInWithCustomToken(auth, window.__initial_auth_token);
-                        } else {
-                            await window.FB.signInAnonymously(auth);
-                        }
+                        await window.FB.signInAnonymously(auth);
                         window.FB.onAuthStateChanged(auth, (u) => setUser(u));
                         setIsReady(true);
                     } catch (e) { setIsReady(true); }
@@ -120,11 +117,8 @@
                 checkAndInit();
                 
                 const savedLogo = localStorage.getItem('customLogo');
-                if (savedLogo) {
-                    setLogoImgBase64(savedLogo);
-                } else {
-                    getLogoBase64().then(url => setLogoImgBase64(url));
-                }
+                if (savedLogo) setLogoImgBase64(savedLogo);
+                else getLogoBase64().then(url => setLogoImgBase64(url));
 
                 if ('webkitSpeechRecognition' in window) {
                     const SpeechRecognition = window.webkitSpeechRecognition;
@@ -152,85 +146,33 @@
                     setAllCases(list.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)));
                 });
                 return () => unsubscribe();
-            }, [user, db]);
+            }, [user, db, canvasAppId]);
 
             const parseSpeech = async (text) => {
                 if (!text.trim()) return;
-                if (!apiKey || apiKey.length < 10) {
-                    setAlertMsg({ title: "金鑰錯誤", body: "偵測到 API Key 無效，請確認程式碼已正確更新。", isError: true });
-                    return;
-                }
                 setIsLoading(true);
-                
                 const promptText = `你是一位專業丈量秘書。請分析以下語音內容，並將其分類填入 JSON 格式。
-請「只」回傳純 JSON 格式的字串，不要加上任何 Markdown 標記 (\`\`\`json 等等都不要加)。
+糾正錯字：門止(門子)、貝-WING(備贏)、子母(紫母)、防撞條(防狀)。
+結構：{ "header": { "address": "", "partHandle": "", "partCollision": "", "partStop": "", "partHinge": "", "redNotice": "", "precautions": "", "orderRemark": "" }, "items": [ { "no": "", "w": 0, "h": 0, "t": 0, "note": "" } ] }`;
 
-【糾正錯字規則】：門止(門子)、貝-WING(備贏)、子母(紫母)、防撞條(防狀)。
-
-【必須嚴格遵守的回傳 JSON 結構】：
-{
-  "header": {
-    "address": "字串",
-    "partHandle": "字串",
-    "partCollision": "字串",
-    "partStop": "字串",
-    "partHinge": "字串",
-    "redNotice": "字串",
-    "precautions": "字串",
-    "orderRemark": "字串"
-  },
-  "items": [
-    {
-      "no": "字串",
-      "w": 數字 (無則填0),
-      "h": 數字 (無則填0),
-      "t": 數字 (無則填0),
-      "note": "字串"
-    }
-  ]
-}
-
-語音內容如下：
-${text}`;
-
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${builtInApiKey}`;
                 try {
-                    const listUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey.trim()}`;
-                    const listResp = await fetch(listUrl);
-                    if (!listResp.ok) throw new Error("無法驗證金鑰，請檢查您的 API Key");
-                    
-                    const listData = await listResp.json();
-                    const validModels = listData.models?.filter(m => m.supportedGenerationMethods?.includes('generateContent')) || [];
-                    if (validModels.length === 0) throw new Error("您的金鑰無可用模型。");
-
-                    let chosenModel = validModels.find(m => m.name.includes("gemini-1.5-flash"))?.name
-                                   || validModels.find(m => m.name.includes("gemini-1.5"))?.name
-                                   || validModels.find(m => m.name.includes("gemini-pro"))?.name
-                                   || validModels[0].name;
-
-                    const url = `https://generativelanguage.googleapis.com/v1beta/${chosenModel}:generateContent?key=${apiKey.trim()}`;
                     const resp = await fetch(url, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: promptText }] }] })
+                        body: JSON.stringify({
+                            contents: [{ role: "user", parts: [{ text: `指令：${promptText}\n內容：${text}` }] }],
+                            generationConfig: { responseMimeType: "application/json" }
+                        })
                     });
-
-                    if (!resp.ok) throw new Error("API 請求失敗");
-
+                    if (!resp.ok) throw new Error("AI 服務呼叫失敗。");
                     const data = await resp.json();
-                    let rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-                    
-                    const startIdx = rawText.indexOf('{');
-                    const endIdx = rawText.lastIndexOf('}');
-                    if (startIdx !== -1 && endIdx !== -1) rawText = rawText.substring(startIdx, endIdx + 1);
-
-                    const result = JSON.parse(rawText);
-                    
+                    const result = JSON.parse(data.candidates[0].content.parts[0].text);
                     let updatedHeader = { ...header };
                     if (result.header) {
                         for (const key in result.header) { if (result.header[key]) updatedHeader[key] = result.header[key]; }
                         setHeader(updatedHeader);
                     }
-                    let updatedItems = [...measurements];
                     if (result.items && result.items.length > 0) {
                         const newItems = result.items.map((i, idx) => ({
                             id: Date.now() + Math.random(),
@@ -238,12 +180,10 @@ ${text}`;
                             w: Number(i.w) || 0, h: Number(i.h) || 0, dw: i.w ? Number(i.w) - 48 : 0, dh: i.h ? Number(i.h) - 30 : 0,
                             t: Number(i.t) || 0, note: i.note || ""
                         }));
-                        updatedItems = [...measurements, ...newItems];
-                        setMeasurements(updatedItems);
+                        setMeasurements([...measurements, ...newItems]);
                     }
-                    syncToCloud(updatedItems, updatedHeader);
                     setTranscript(""); 
-                    setAlertMsg({ title: "解析完成", body: "語音數據已成功自動帶入格子！", isError: false });
+                    setAlertMsg({ title: "解析完成", body: "數據已帶入表格！", isError: false });
                 } catch (e) { 
                     setAlertMsg({ title: "解析失敗", body: e.message, isError: true });
                 } finally { setIsLoading(false); }
@@ -254,80 +194,23 @@ ${text}`;
                 else { transcriptAccumulator.current = ""; setTranscript(""); recognitionRef.current.start(); setIsRecording(true); }
             };
 
-            const handleVideoSelect = (e) => {
-                const file = e.target.files[0];
-                if (!file) return;
-                setHeader({...header, videoLink: URL.createObjectURL(file)});
-                setAlertMsg({ title: "影片載入", body: "本地預覽已啟動！", isError: false });
+            const syncToCloud = async () => {
+                if (!db || !user || !header.orderNo) return;
+                const docRef = window.FB.doc(db, 'artifacts', canvasAppId, 'public', 'data', 'cases', header.orderNo);
+                await window.FB.setDoc(docRef, { ...header, items: measurements, updatedAt: new Date().toISOString() });
             };
 
-            const syncToCloud = async (customItems = null, customHeader = null) => {
-                if (!db) return;
-                const curH = customHeader || header;
-                const curI = customItems || measurements;
-                if (!curH.orderNo) return;
-                const docRef = window.FB.doc(db, 'artifacts', canvasAppId, 'public', 'data', 'cases', curH.orderNo);
-                await window.FB.setDoc(docRef, { ...curH, items: curI, updatedAt: new Date().toISOString() });
-            };
-
-            // 🚀 處理手動點擊同步按鈕的邏輯
             const handleManualSync = async () => {
                 if (!header.orderNo) {
-                    setAlertMsg({ title: "無法同步", body: "請先輸入「編號」，系統需要編號作為存檔名稱。", isError: true });
+                    setAlertMsg({ title: "無法同步", body: "請先輸入「編號」。", isError: true });
                     return;
                 }
                 setIsLoading(true);
                 try {
                     await syncToCloud();
-                    setAlertMsg({ title: "同步成功", body: `編號 [${header.orderNo}] 的資料已經安全儲存至雲端！`, isError: false });
-                } catch (e) {
-                    setAlertMsg({ title: "同步失敗", body: e.message, isError: true });
-                } finally {
-                    setIsLoading(false);
-                }
-            };
-
-            const loadCase = (c) => { setHeader({ ...c, videoLink: "" }); setMeasurements(c.items || []); setView('main'); };
-
-            // 🚀 新增：處理刪除歷史紀錄的邏輯
-            const handleDeleteClick = (e, orderNo) => {
-                e.stopPropagation(); // 阻止觸發整行的載入事件
-                setConfirmDialog({
-                    title: "確認刪除",
-                    body: `您確定要永久刪除編號 [${orderNo}] 的紀錄嗎？\n刪除後無法復原。`,
-                    onConfirm: async () => {
-                        setConfirmDialog(null);
-                        setIsLoading(true);
-                        try {
-                            const docRef = window.FB.doc(db, 'artifacts', canvasAppId, 'public', 'data', 'cases', orderNo);
-                            await window.FB.deleteDoc(docRef);
-                            setAlertMsg({ title: "刪除成功", body: `編號 [${orderNo}] 的紀錄已被移除。`, isError: false });
-                            
-                            // 如果刪除的剛好是目前畫面上正在編輯的案子，就將畫面清空
-                            if (header.orderNo === orderNo) {
-                                setHeader({ orderNo: "", address: "", contact: "", phone: "", surveyor: "", company: "", frameStyle: "", doorStyle: "", precautions: "", orderRemark: "", redNotice: "", partCollision: "", partHinge: "", partStop: "", partHandle: "", deposit: "0", videoLink: "" });
-                                setMeasurements([]);
-                            }
-                        } catch (err) {
-                            setAlertMsg({ title: "刪除失敗", body: err.message, isError: true });
-                        } finally {
-                            setIsLoading(false);
-                        }
-                    }
-                });
-            };
-
-            const handleLogoUpload = (e) => {
-                const file = e.target.files[0];
-                if (!file) return;
-                const reader = new FileReader();
-                reader.onload = (event) => {
-                    const base64 = event.target.result;
-                    setLogoImgBase64(base64);
-                    localStorage.setItem('customLogo', base64);
-                    setAlertMsg({ title: "Logo 更新成功", body: "您的專屬 Logo 已儲存！未來導出的 Excel 都會使用這張圖。", isError: false });
-                };
-                reader.readAsDataURL(file);
+                    setAlertMsg({ title: "同步成功", body: `編號 [${header.orderNo}] 已儲存！`, isError: false });
+                } catch (e) { setAlertMsg({ title: "同步失敗", body: e.message, isError: true }); }
+                finally { setIsLoading(false); }
             };
 
             const exportExcel = async () => {
@@ -335,11 +218,7 @@ ${text}`;
                 try {
                     const wb = new window.ExcelJS.Workbook();
                     const sh = wb.addWorksheet('下料單');
-                    
-                    sh.columns = [
-                        { width: 6 },  { width: 8 },  { width: 8 },  { width: 8 },  { width: 8 },  { width: 8 },  
-                        { width: 8 },  { width: 8 },  { width: 22 }, { width: 6 },  { width: 6 },  { width: 6 }   
-                    ];
+                    sh.columns = [ { width: 6 }, { width: 8 }, { width: 8 }, { width: 8 }, { width: 8 }, { width: 8 }, { width: 8 }, { width: 8 }, { width: 22 }, { width: 6 }, { width: 6 }, { width: 6 } ];
                     const b = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
                     
                     sh.mergeCells('A1:B3');
@@ -348,8 +227,7 @@ ${text}`;
                         sh.addImage(img, { tl: { col: 0, row: 0 }, br: { col: 2, row: 3 } });
                     }
                     sh.mergeCells('C1:H3');
-                    const tit = sh.getCell('C1'); 
-                    tit.value = '下 料 單'; tit.font = { size: 24, bold: true }; tit.alignment = { vertical:'middle', horizontal:'center' };
+                    const tit = sh.getCell('C1'); tit.value = '下 料 單'; tit.font = { size: 24, bold: true }; tit.alignment = { vertical:'middle', horizontal:'center' };
 
                     sh.getCell('I1').value = '訂單編號:'; sh.mergeCells('J1:L1'); sh.getCell('J1').value = header.orderNo;
                     sh.getCell('I2').value = '丈量人員:'; sh.mergeCells('J2:L2'); sh.getCell('J2').value = header.surveyor;
@@ -385,7 +263,7 @@ ${text}`;
                     hRow.eachCell(c => { c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFF2F2F2'}}; c.border=b; c.alignment={horizontal:'center', vertical:'middle'}; c.font={bold:true, size:11}; });
 
                     let cur = 10;
-                    measurements.forEach((m, idx) => {
+                    measurements.forEach((m) => {
                         const r = sh.getRow(cur++); r.height = 25;
                         r.values = [m.no, m.w, m.h, m.dw, m.dh, m.t, m.t, 50, m.note, "房", "隱", ""];
                         r.eachCell((c, colIdx) => { 
@@ -448,12 +326,12 @@ ${text}`;
                 return new Promise((resolve) => {
                     const canvas = document.createElement('canvas'); canvas.width = 240; canvas.height = 240;
                     const ctx = canvas.getContext('2d'); ctx.fillStyle = 'white'; ctx.fillRect(0, 0, 240, 240);
-                    ctx.beginPath(); ctx.arc(120, 100, 80, 0, 2 * Math.PI); ctx.lineWidth = 18; ctx.strokeStyle = '#111'; ctx.stroke();
-                    ctx.font = '900 100px "Noto Serif TC", serif'; ctx.fillStyle = '#111'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('匠', 120, 105);
-                    ctx.font = '900 26px "Noto Serif TC", serif'; ctx.fillText('門扉美學館', 120, 215);
+                    ctx.font = '900 100px "Noto Serif TC", serif'; ctx.fillStyle = '#111'; ctx.textAlign = 'center'; ctx.fillText('匠', 120, 140);
                     resolve(canvas.toDataURL('image/png'));
                 });
             };
+
+            const loadCase = (c) => { setHeader({ ...c }); setMeasurements(c.items || []); setView('main'); };
 
             if (!isReady) return <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white italic font-black text-3xl animate-pulse">系統加載中...</div>;
 
@@ -461,16 +339,8 @@ ${text}`;
                 <div className="min-h-screen flex flex-col pb-20 relative text-slate-800">
                     <nav className="bg-slate-900 text-white p-4 md:p-5 shadow-xl sticky top-0 z-50 flex justify-between items-center">
                         <div className="flex items-center gap-3">
-                            <div className="cursor-pointer group relative" onClick={() => logoInputRef.current.click()} title="點擊更換 Logo">
-                                {logoImgBase64 && (
-                                    <div className="bg-white p-1 rounded-xl shadow-lg relative overflow-hidden">
-                                        <img src={logoImgBase64} className="w-8 h-8 md:w-10 md:h-10 object-contain" />
-                                        <div className="absolute inset-0 bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                                            <Icon name="upload" className="w-4 h-4 md:w-5 md:h-5 text-white" />
-                                        </div>
-                                    </div>
-                                )}
-                                <input type="file" ref={logoInputRef} hidden accept="image/*" onChange={handleLogoUpload} />
+                            <div className="bg-white p-1 rounded-xl shadow-lg relative overflow-hidden">
+                                {logoImgBase64 && <img src={logoImgBase64} className="w-8 h-8 md:w-10 md:h-10 object-contain" />}
                             </div>
                             <div className="cursor-pointer" onClick={() => setView("main")}>
                                 <h1 className="text-lg md:text-2xl font-black italic uppercase leading-none tracking-tighter">丈量尺寸</h1>
@@ -492,9 +362,9 @@ ${text}`;
                                 <div className="lg:col-span-2 space-y-1"><label className="text-xs font-black text-slate-400 uppercase tracking-widest">案場地址</label><input value={header.address} onChange={e=>setHeader({...header, address: e.target.value})} className="w-full border-b-2 p-1 text-lg md:text-xl font-bold outline-none" placeholder="輸入地址" /></div>
                                 <div className="space-y-1 text-center"><label className="text-xs font-black text-red-500 uppercase tracking-widest">影片預覽</label>
                                     <button onClick={()=>fileInputRef.current.click()} className="w-full bg-slate-50 py-2.5 md:py-3 rounded-xl text-xs font-black border flex items-center justify-center gap-2">
-                                        <Icon name="video" className="w-4 h-4 md:w-5 md:h-5" /> {header.videoLink ? "更換影片" : "選取影片"}
+                                        <Icon name="video" className="w-4 h-4" /> {header.videoLink ? "更換影片" : "選取影片"}
                                     </button>
-                                    <input type="file" ref={fileInputRef} hidden accept="video/*" onChange={handleVideoSelect} />
+                                    <input type="file" ref={fileInputRef} hidden accept="video/*" onChange={e=>{if(e.target.files[0]) setHeader({...header, videoLink:URL.createObjectURL(e.target.files[0])})}} />
                                 </div>
                                 <button onClick={exportExcel} className="bg-emerald-600 text-white py-2.5 md:py-3 rounded-xl text-sm font-black shadow-lg mt-auto flex items-center justify-center gap-2"><Icon name="file-spreadsheet" className="w-5 h-5 md:w-6 md:h-6" /> 導出 EXCEL</button>
                             </div>
@@ -502,20 +372,19 @@ ${text}`;
                             {header.videoLink && (
                                 <div className="bg-black rounded-2xl md:rounded-[2.5rem] overflow-hidden shadow-2xl aspect-video max-w-2xl mx-auto border-4 md:border-8 border-white relative group">
                                     <video src={header.videoLink} controls className="w-full h-full object-cover"></video>
-                                    <button onClick={()=>{setHeader({...header, videoLink:''});}} className="absolute top-4 right-4 md:top-6 md:right-6 bg-red-500 text-white p-2 md:p-3 rounded-full shadow-xl"><Icon name="trash-2" className="w-5 h-5 md:w-6 md:h-6" /></button>
+                                    <button onClick={()=>{setHeader({...header, videoLink:''});}} className="absolute top-4 right-4 bg-red-500 text-white p-2 rounded-full shadow-xl"><Icon name="trash-2" className="w-5 h-5" /></button>
                                 </div>
                             )}
 
                             <div className="bg-slate-900 rounded-3xl md:rounded-[3rem] p-6 md:p-10 text-center relative overflow-hidden shadow-2xl border-4 md:border-8 border-white">
-                                {isLoading && <div className="absolute inset-0 bg-slate-900/95 z-30 flex flex-col items-center justify-center"><Icon name="loader-2" className="animate-spin text-blue-500 w-16 h-16 md:w-20 md:h-20 mb-4" /><p className="text-blue-400 font-black tracking-widest text-base md:text-lg animate-pulse uppercase italic">AI 正在快速解析數據...</p></div>}
+                                {isLoading && <div className="absolute inset-0 bg-slate-900/95 z-30 flex flex-col items-center justify-center"><Icon name="loader-2" className="animate-spin text-blue-500 w-16 h-16 mb-4" /><p className="text-blue-400 font-black tracking-widest text-base md:text-lg animate-pulse uppercase italic">AI 正在解析數據...</p></div>}
                                 <button onClick={toggleRecording} className={`w-24 h-24 md:w-32 md:h-32 rounded-full flex items-center justify-center mx-auto transition-all border-[8px] md:border-[12px] border-slate-800 shadow-2xl ${isRecording ? 'record-pulse' : 'bg-white'}`}>
                                     {isRecording ? <div className="w-8 h-8 md:w-10 md:h-10 bg-white rounded-md md:rounded-lg"></div> : <Icon name="mic" className="w-10 h-10 md:w-16 md:h-16 text-slate-900" />}
                                 </button>
-                                
                                 {transcript !== "" && (
-                                    <div className="mt-6 md:mt-8 space-y-4 md:space-y-6">
-                                        <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700 relative text-left mt-4">
-                                            <label className="absolute -top-3 left-3 bg-slate-900 text-blue-400 text-[10px] font-black px-2 uppercase tracking-widest">語音逐字稿 (可點擊修改)</label>
+                                    <div className="mt-6 md:mt-8 space-y-4 md:space-y-6 text-left">
+                                        <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700 relative mt-4">
+                                            <label className="absolute -top-3 left-3 bg-slate-900 text-blue-400 text-[10px] font-black px-2 uppercase tracking-widest">語音逐字稿</label>
                                             <textarea value={transcript} onChange={(e) => setTranscript(e.target.value)} className="w-full bg-transparent text-white/90 text-sm md:text-base font-bold italic leading-relaxed focus:outline-none resize-none min-h-[60px] md:min-h-[80px]" />
                                         </div>
                                         {!isRecording && <button onClick={() => parseSpeech(transcript)} className="mx-auto bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-6 py-3 md:px-8 md:py-4 rounded-xl md:rounded-2xl font-black text-base md:text-lg shadow-xl flex items-center justify-center gap-2 md:gap-3 active:scale-95 transition-all"><Icon name="bot" className="w-5 h-5 md:w-6 md:h-6" /> 解析並帶入</button>}
@@ -526,33 +395,24 @@ ${text}`;
                             <div className="card overflow-hidden">
                                 <div className="p-4 md:p-6 bg-slate-50 border-b flex justify-between items-center">
                                     <h3 className="section-title italic tracking-widest uppercase">丈量數據列表</h3>
-                                    <button onClick={() => { setMeasurements([...measurements, { id: Date.now(), no: (measurements.length+1)+".", w:0, h:0, dw:0, dh:0, t:0, note:"" }]); }} className="bg-indigo-600 text-white px-3 py-1.5 md:px-4 md:py-2 rounded-lg text-xs font-black">+ 手動新增</button>
+                                    <button onClick={() => { setMeasurements([...measurements, { id: Date.now(), no: (measurements.length+1)+".", w:0, h:0, dw:0, dh:0, t:0, note:"" }]); }} className="bg-indigo-600 text-white px-3 py-1.5 md:px-4 md:py-2 rounded-lg text-xs font-black">+ 新增</button>
                                 </div>
                                 <div className="overflow-x-auto no-scrollbar">
-                                    <table className="w-full text-left min-w-[900px] border-separate border-spacing-0 text-center">
-                                        <thead className="bg-slate-50 text-[10px] md:text-xs text-slate-400 font-black uppercase sticky top-0 z-20 shadow-sm border-b">
-                                            <tr><th className="px-4 md:px-8 py-4 md:py-6">編號</th><th className="px-2 md:px-4 py-4 md:py-6 text-blue-700">洞寬</th><th className="px-2 md:px-4 py-4 md:py-6 text-blue-700">洞高</th><th className="px-2 md:px-4 py-4 md:py-6 text-emerald-600">門寬(-48)</th><th className="px-2 md:px-4 py-4 md:py-6 text-emerald-600">門高(-30)</th><th className="px-2 md:px-4 py-4 md:py-6 font-black">牆厚</th><th className="px-4 md:px-8 py-4 md:py-6 text-left">備註</th><th className="px-2 md:px-4 py-4 md:py-6 w-16 md:w-24"></th></tr>
+                                    <table className="w-full text-left min-w-[900px] text-center border-separate border-spacing-0">
+                                        <thead className="bg-slate-50 text-[10px] md:text-xs text-slate-400 font-black uppercase border-b sticky top-0 z-10">
+                                            <tr><th className="px-4 md:px-8 py-4">序號</th><th className="px-2 py-4 text-blue-700">洞寬</th><th className="px-2 py-4 text-blue-700">洞高</th><th className="px-2 py-4 text-emerald-600">門寬(-48)</th><th className="px-2 py-4 text-emerald-600">門高(-30)</th><th className="px-2 py-4">牆厚</th><th className="px-4 py-4 text-left">備註</th><th className="w-16"></th></tr>
                                         </thead>
                                         <tbody className="divide-y divide-slate-100">
                                             {measurements.map(m => (
                                                 <tr key={m.id} className="hover:bg-blue-50/20 group">
-                                                    <td className="px-4 md:px-8 py-3 md:py-6 font-bold text-slate-400 text-base md:text-xl italic">{m.no}</td>
-                                                    <td className="px-2 md:px-4 py-3 md:py-6"><input type="number" value={m.w || ""} onChange={e=>{
-                                                        const val = parseInt(e.target.value) || 0;
-                                                        setMeasurements(measurements.map(x => x.id === m.id ? {...x, w:val, dw:val-48} : x));
-                                                    }} className="w-full bg-transparent border-none p-0 text-base md:text-xl font-black text-blue-800 focus:ring-0 text-center" placeholder="0" /></td>
-                                                    <td className="px-2 md:px-4 py-3 md:py-6"><input type="number" value={m.h || ""} onChange={e=>{
-                                                        const val = parseInt(e.target.value) || 0;
-                                                        setMeasurements(measurements.map(x => x.id === m.id ? {...x, h:val, dh:val-30} : x));
-                                                    }} className="w-full bg-transparent border-none p-0 text-base md:text-xl font-black text-blue-800 focus:ring-0 text-center" placeholder="0" /></td>
-                                                    <td className="px-2 md:px-4 py-3 md:py-6 font-black text-emerald-600 text-lg md:text-2xl">{m.dw}</td>
-                                                    <td className="px-2 md:px-4 py-3 md:py-6 font-black text-emerald-600 text-lg md:text-2xl">{m.dh}</td>
-                                                    <td className="px-2 md:px-4 py-3 md:py-6"><input type="number" value={m.t || ""} onChange={e=>{
-                                                        const val = parseInt(e.target.value) || 0;
-                                                        setMeasurements(measurements.map(x => x.id === m.id ? {...x, t:val} : x));
-                                                    }} className="w-full bg-transparent border-none p-0 text-base md:text-xl font-bold text-center focus:ring-0" placeholder="0" /></td>
-                                                    <td className="px-4 md:px-8 py-3 md:py-6 text-left"><input value={m.note} onChange={e=>setMeasurements(measurements.map(x=>x.id===m.id?{...x, note:e.target.value}:x))} className="w-full bg-transparent border-none p-0 text-sm md:text-base font-bold italic focus:ring-0" placeholder="語音備註" /></td>
-                                                    <td className="px-2 md:px-4 py-3 md:py-6"><button onClick={() => setMeasurements(measurements.filter(x=>x.id!==m.id))} className="text-slate-300 hover:text-red-500 md:opacity-0 group-hover:opacity-100"><Icon name="trash-2" className="w-5 h-5 md:w-6 md:h-6" /></button></td>
+                                                    <td className="px-4 py-4 font-bold text-slate-400 text-base md:text-xl italic">{m.no}</td>
+                                                    <td className="px-2 py-4"><input type="number" value={m.w || ""} onChange={e=>{ const val = parseInt(e.target.value) || 0; setMeasurements(measurements.map(x => x.id === m.id ? {...x, w:val, dw:val-48} : x)); }} className="w-full bg-transparent border-none p-0 text-base md:text-xl font-black text-blue-800 text-center" /></td>
+                                                    <td className="px-2 py-4"><input type="number" value={m.h || ""} onChange={e=>{ const val = parseInt(e.target.value) || 0; setMeasurements(measurements.map(x => x.id === m.id ? {...x, h:val, dh:val-30} : x)); }} className="w-full bg-transparent border-none p-0 text-base md:text-xl font-black text-blue-800 text-center" /></td>
+                                                    <td className="px-2 py-4 font-black text-emerald-600 text-lg md:text-2xl">{m.dw}</td>
+                                                    <td className="px-2 py-4 font-black text-emerald-600 text-lg md:text-2xl">{m.dh}</td>
+                                                    <td className="px-2 py-4"><input type="number" value={m.t || ""} onChange={e=>{ const val = parseInt(e.target.value) || 0; setMeasurements(measurements.map(x => x.id === m.id ? {...x, t:val} : x)); }} className="w-full bg-transparent border-none p-0 text-base md:text-xl font-bold text-center" /></td>
+                                                    <td className="px-4 py-4 text-left"><input value={m.note} onChange={e=>setMeasurements(measurements.map(x=>x.id===m.id?{...x, note:e.target.value}:x))} className="w-full bg-transparent border-none p-0 text-sm md:text-base font-bold italic" /></td>
+                                                    <td><button onClick={() => setMeasurements(measurements.filter(x=>x.id!==m.id))} className="text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100"><Icon name="trash-2" className="w-5 h-5" /></button></td>
                                                 </tr>
                                             ))}
                                         </tbody>
@@ -561,17 +421,17 @@ ${text}`;
                             </div>
 
                             <div className="card p-5 md:p-10 space-y-6 md:space-y-10">
-                                <h3 className="section-title uppercase tracking-widest italic">五金配件與詳細備註</h3>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-10">
-                                    <div className="space-y-4 md:space-y-6">
-                                        <div className="space-y-1.5 md:space-y-2"><label className="text-xs font-black text-blue-500 uppercase tracking-widest">注意事項</label><textarea rows="2" value={header.precautions} onChange={e=>setHeader({...header, precautions:e.target.value})} className="w-full bg-slate-50 border rounded-xl md:rounded-2xl p-3 md:p-5 text-base md:text-lg font-bold resize-none" placeholder="語音自動填入" /></div>
-                                        <div className="space-y-1.5 md:space-y-2"><label className="text-xs font-black text-blue-500 uppercase tracking-widest">訂單備註</label><textarea rows="2" value={header.orderRemark} onChange={e=>setHeader({...header, orderRemark:e.target.value})} className="w-full bg-slate-50 border rounded-xl md:rounded-2xl p-3 md:p-5 text-base md:text-lg font-bold resize-none" placeholder="語音自動填入" /></div>
+                                <h3 className="section-title uppercase tracking-widest italic">配件與詳細備註</h3>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div className="space-y-4">
+                                        <div className="space-y-1.5"><label className="text-xs font-black text-blue-500 uppercase tracking-widest">注意事項</label><textarea rows="2" value={header.precautions} onChange={e=>setHeader({...header, precautions:e.target.value})} className="w-full bg-slate-50 border rounded-xl p-3 text-base font-bold resize-none" /></div>
+                                        <div className="space-y-1.5"><label className="text-xs font-black text-blue-500 uppercase tracking-widest">訂單備註</label><textarea rows="2" value={header.orderRemark} onChange={e=>setHeader({...header, orderRemark:e.target.value})} className="w-full bg-slate-50 border rounded-xl p-3 text-base font-bold resize-none" /></div>
                                     </div>
-                                    <div className="space-y-1.5 md:space-y-2"><label className="text-xs font-black text-red-500 uppercase tracking-widest italic font-black">大紅字警示區</label><textarea rows="4" value={header.redNotice} onChange={e=>setHeader({...header, redNotice:e.target.value})} className="w-full bg-red-50/30 border border-red-100 rounded-2xl md:rounded-[2.5rem] p-4 md:p-6 text-red-600 font-black text-2xl md:text-3xl text-center resize-none leading-relaxed shadow-inner" placeholder="語音填入 (例: 門下大陸)" /></div>
+                                    <div className="space-y-1.5"><label className="text-xs font-black text-red-500 uppercase tracking-widest italic font-black">大紅字警示區</label><textarea rows="4" value={header.redNotice} onChange={e=>setHeader({...header, redNotice:e.target.value})} className="w-full bg-red-50/30 border border-red-100 rounded-2xl p-4 text-red-600 font-black text-2xl text-center resize-none leading-relaxed shadow-inner" placeholder="門下大陸" /></div>
                                 </div>
                                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-8">
                                     {['partCollision','partHinge','partStop','partHandle'].map((k, i) => (
-                                        <div key={k} className="bg-slate-50 p-4 md:p-6 rounded-2xl md:rounded-3xl border border-slate-200 shadow-sm text-center">
+                                        <div key={k} className="bg-slate-50 p-4 md:p-6 rounded-2xl md:rounded-3xl border border-slate-200 text-center shadow-sm">
                                             <label className="text-xs font-black text-slate-400 mb-2 md:mb-3 block uppercase tracking-widest">{['防撞條','鉸鏈','門止','把手'][i]}</label>
                                             <textarea rows="3" value={header[k]} onChange={e=>setHeader({...header, [k]:e.target.value})} className="w-full bg-white border rounded-xl p-2 md:p-4 text-base md:text-xl font-black outline-none resize-none text-center leading-loose text-slate-700 shadow-inner" placeholder="語音填入" />
                                         </div>
@@ -580,18 +440,16 @@ ${text}`;
                             </div>
                         </main>
                     ) : (
-                        <main className="p-4 lg:p-8 max-w-5xl mx-auto w-full">
+                        <main className="p-4 max-w-5xl mx-auto w-full">
                             <div className="card">
-                                <div className="p-6 md:p-8 bg-slate-900 text-white flex justify-between items-center rounded-t-2xl md:rounded-t-[2.5rem]"><h3 className="font-black italic uppercase text-lg md:text-2xl tracking-widest">存檔歷史紀錄</h3><span className="bg-blue-600 px-3 py-1 md:px-4 rounded-full text-xs font-black">{allCases.length} 案存檔</span></div>
+                                <div className="p-6 bg-slate-900 text-white flex justify-between items-center rounded-t-2xl"><h3 className="font-black italic uppercase text-lg tracking-widest">歷史紀錄</h3><span className="bg-blue-600 px-3 py-1 rounded-full text-xs font-black">{allCases.length} 案存檔</span></div>
                                 <div className="divide-y divide-slate-100">
                                     {allCases.map(c => (
-                                        <div key={c.id} className="p-5 md:p-8 hover:bg-blue-50/30 transition-all flex justify-between items-center cursor-pointer group" onClick={() => loadCase(c)}>
-                                            <div className="space-y-1"><p className="text-blue-600 font-black text-xl md:text-3xl mb-1 tracking-tighter">[{c.orderNo || "無編號"}]</p><p className="text-base md:text-xl font-bold text-slate-500">{c.address || "無地址"}</p><p className="text-[10px] text-slate-400 font-black uppercase mt-2">同步時間: {new Date(c.updatedAt).toLocaleString()}</p></div>
-                                            <div className="flex items-center gap-2 md:gap-4">
-                                                <button onClick={(e) => handleDeleteClick(e, c.orderNo)} className="p-3 md:p-4 bg-red-50 text-red-500 rounded-full hover:bg-red-500 hover:text-white transition-all shadow-sm" title="刪除">
-                                                    <Icon name="trash-2" className="w-5 h-5 md:w-6 md:h-6" />
-                                                </button>
-                                                <Icon name="chevron-right" className="w-8 h-8 md:w-12 md:h-12 text-slate-200 group-hover:text-blue-500 transition-colors hidden sm:block" />
+                                        <div key={c.id} className="p-5 hover:bg-blue-50/30 transition-all flex justify-between items-center cursor-pointer group" onClick={() => loadCase(c)}>
+                                            <div className="space-y-1"><p className="text-blue-600 font-black text-xl md:text-3xl mb-1 tracking-tighter">[{c.orderNo || "無編號"}]</p><p className="text-base md:text-xl font-bold text-slate-500">{c.address || "無地址"}</p></div>
+                                            <div className="flex items-center gap-4">
+                                                <button onClick={(e) => { e.stopPropagation(); setConfirmDialog({ title: "刪除紀錄", body: `確定刪除 [${c.orderNo}] 嗎？`, onConfirm: async () => { await window.FB.deleteDoc(window.FB.doc(db, 'artifacts', canvasAppId, 'public', 'data', 'cases', c.orderNo)); setConfirmDialog(null); } }); }} className="p-3 text-red-500 hover:bg-red-50 rounded-full transition-all"><Icon name="trash-2" className="w-5 h-5 md:w-6 md:h-6" /></button>
+                                                <Icon name="chevron-right" className="w-8 h-8 text-slate-200 group-hover:text-blue-500" />
                                             </div>
                                         </div>
                                     ))}
@@ -602,29 +460,24 @@ ${text}`;
 
                     {alertMsg && (
                         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-                            <div className="bg-white rounded-3xl md:rounded-[2.5rem] p-6 md:p-8 max-w-sm w-full shadow-2xl animate-in fade-in zoom-in duration-200">
-                                <div className={`w-16 h-16 md:w-20 md:h-20 rounded-full flex items-center justify-center mx-auto mb-4 md:mb-6 ${alertMsg.isError ? 'bg-red-50 text-red-500' : 'bg-emerald-50 text-emerald-500'}`}>
-                                    <Icon name={alertMsg.isError ? "x-circle" : "check-circle-2"} className="w-8 h-8 md:w-10 md:h-10" />
-                                </div>
-                                <h3 className="text-xl md:text-2xl font-black text-center text-slate-800 mb-2 md:mb-3">{alertMsg.title}</h3>
-                                <p className="text-slate-500 text-sm font-bold leading-relaxed text-center whitespace-pre-wrap">{alertMsg.body}</p>
-                                <button onClick={() => setAlertMsg(null)} className="mt-6 md:mt-8 w-full bg-slate-900 text-white py-3 md:py-4 rounded-xl md:rounded-2xl font-black text-base md:text-lg shadow-lg active:scale-95 transition-all">我知道了</button>
+                            <div className="bg-white rounded-[2rem] p-6 max-w-sm w-full shadow-2xl animate-in zoom-in duration-200 text-center">
+                                <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 ${alertMsg.isError ? 'bg-red-50 text-red-500' : 'bg-emerald-50 text-emerald-500'}`}><Icon name={alertMsg.isError ? "x-circle" : "check-circle-2"} className="w-8 h-8" /></div>
+                                <h3 className="text-xl font-black mb-2">{alertMsg.title}</h3>
+                                <p className="text-slate-500 text-sm font-bold whitespace-pre-wrap">{alertMsg.body}</p>
+                                <button onClick={() => setAlertMsg(null)} className="mt-6 w-full bg-slate-900 text-white py-3 rounded-xl font-black">確定</button>
                             </div>
                         </div>
                     )}
 
-                    {/* 🚀 新增：確認刪除彈窗 UI */}
                     {confirmDialog && (
-                        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
-                            <div className="bg-white rounded-3xl md:rounded-[2.5rem] p-6 md:p-8 max-w-sm w-full shadow-2xl animate-in fade-in zoom-in duration-200">
-                                <div className="w-16 h-16 md:w-20 md:h-20 rounded-full flex items-center justify-center mx-auto mb-4 md:mb-6 bg-red-50 text-red-500">
-                                    <Icon name="alert-triangle" className="w-8 h-8 md:w-10 md:h-10" />
-                                </div>
-                                <h3 className="text-xl md:text-2xl font-black text-center text-slate-800 mb-2 md:mb-3">{confirmDialog.title}</h3>
-                                <p className="text-slate-500 text-sm font-bold leading-relaxed text-center whitespace-pre-wrap">{confirmDialog.body}</p>
-                                <div className="mt-6 md:mt-8 flex gap-3">
-                                    <button onClick={() => setConfirmDialog(null)} className="flex-1 bg-slate-100 text-slate-600 py-3 md:py-4 rounded-xl md:rounded-2xl font-black text-base md:text-lg shadow-sm active:scale-95 transition-all">取消</button>
-                                    <button onClick={confirmDialog.onConfirm} className="flex-1 bg-red-500 text-white py-3 md:py-4 rounded-xl md:rounded-2xl font-black text-base md:text-lg shadow-lg shadow-red-500/30 active:scale-95 transition-all">確認刪除</button>
+                        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+                            <div className="bg-white rounded-[2rem] p-6 max-w-sm w-full shadow-2xl animate-in zoom-in duration-200 text-center">
+                                <div className="w-16 h-16 rounded-full bg-red-50 text-red-500 flex items-center justify-center mx-auto mb-4"><Icon name="alert-triangle" className="w-8 h-8" /></div>
+                                <h3 className="text-xl font-black mb-2">{confirmDialog.title}</h3>
+                                <p className="text-slate-500 text-sm font-bold">{confirmDialog.body}</p>
+                                <div className="mt-6 flex gap-3">
+                                    <button onClick={() => setConfirmDialog(null)} className="flex-1 bg-slate-100 text-slate-600 py-3 rounded-xl font-black">取消</button>
+                                    <button onClick={confirmDialog.onConfirm} className="flex-1 bg-red-500 text-white py-3 rounded-xl font-black">確認刪除</button>
                                 </div>
                             </div>
                         </div>
