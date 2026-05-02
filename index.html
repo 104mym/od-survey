@@ -56,8 +56,8 @@
             return <span ref={ref} className="inline-flex items-center justify-center" />;
         };
 
-        // 🚀 版本號：v1.2.0 (手機 UI 排版優化版)
-        const version = "v1.2.0";
+        // 🚀 版本號：v1.2.2 (新增歷史紀錄刪除功能)
+        const version = "v1.2.2";
         const apiKey = "AIzaSyCBBjJwbHHvuTDvgJbyUZzHOYyE5Owa5bg"; 
 
         const App = () => {
@@ -72,6 +72,7 @@
             const [transcript, setTranscript] = useState("");
             const [logoImgBase64, setLogoImgBase64] = useState("");
             const [alertMsg, setAlertMsg] = useState(null); 
+            const [confirmDialog, setConfirmDialog] = useState(null); // 新增：確認刪除彈窗狀態
 
             const recognitionRef = useRef(null);
             const fileInputRef = useRef(null);
@@ -269,7 +270,52 @@ ${text}`;
                 await window.FB.setDoc(docRef, { ...curH, items: curI, updatedAt: new Date().toISOString() });
             };
 
+            // 🚀 處理手動點擊同步按鈕的邏輯
+            const handleManualSync = async () => {
+                if (!header.orderNo) {
+                    setAlertMsg({ title: "無法同步", body: "請先輸入「編號」，系統需要編號作為存檔名稱。", isError: true });
+                    return;
+                }
+                setIsLoading(true);
+                try {
+                    await syncToCloud();
+                    setAlertMsg({ title: "同步成功", body: `編號 [${header.orderNo}] 的資料已經安全儲存至雲端！`, isError: false });
+                } catch (e) {
+                    setAlertMsg({ title: "同步失敗", body: e.message, isError: true });
+                } finally {
+                    setIsLoading(false);
+                }
+            };
+
             const loadCase = (c) => { setHeader({ ...c, videoLink: "" }); setMeasurements(c.items || []); setView('main'); };
+
+            // 🚀 新增：處理刪除歷史紀錄的邏輯
+            const handleDeleteClick = (e, orderNo) => {
+                e.stopPropagation(); // 阻止觸發整行的載入事件
+                setConfirmDialog({
+                    title: "確認刪除",
+                    body: `您確定要永久刪除編號 [${orderNo}] 的紀錄嗎？\n刪除後無法復原。`,
+                    onConfirm: async () => {
+                        setConfirmDialog(null);
+                        setIsLoading(true);
+                        try {
+                            const docRef = window.FB.doc(db, 'artifacts', canvasAppId, 'public', 'data', 'cases', orderNo);
+                            await window.FB.deleteDoc(docRef);
+                            setAlertMsg({ title: "刪除成功", body: `編號 [${orderNo}] 的紀錄已被移除。`, isError: false });
+                            
+                            // 如果刪除的剛好是目前畫面上正在編輯的案子，就將畫面清空
+                            if (header.orderNo === orderNo) {
+                                setHeader({ orderNo: "", address: "", contact: "", phone: "", surveyor: "", company: "", frameStyle: "", doorStyle: "", precautions: "", orderRemark: "", redNotice: "", partCollision: "", partHinge: "", partStop: "", partHandle: "", deposit: "0", videoLink: "" });
+                                setMeasurements([]);
+                            }
+                        } catch (err) {
+                            setAlertMsg({ title: "刪除失敗", body: err.message, isError: true });
+                        } finally {
+                            setIsLoading(false);
+                        }
+                    }
+                });
+            };
 
             const handleLogoUpload = (e) => {
                 const file = e.target.files[0];
@@ -435,7 +481,7 @@ ${text}`;
                         </div>
                         <div className="flex gap-2">
                             <button onClick={() => setView(view === 'main' ? 'history' : 'main')} className="bg-slate-800 px-3 py-2 md:px-4 md:py-2 rounded-xl text-xs font-black flex items-center gap-1"><Icon name={view === 'main' ? "list" : "chevron-left"} className="w-4 h-4" /> {view === 'main' ? "紀錄" : "返回"}</button>
-                            <button onClick={() => syncToCloud()} className="bg-blue-600 px-3 py-2 md:px-4 md:py-2 rounded-xl text-xs font-black shadow-lg">同步</button>
+                            <button onClick={handleManualSync} className="bg-blue-600 px-3 py-2 md:px-4 md:py-2 rounded-xl text-xs font-black shadow-lg">同步</button>
                         </div>
                     </nav>
 
@@ -541,7 +587,12 @@ ${text}`;
                                     {allCases.map(c => (
                                         <div key={c.id} className="p-5 md:p-8 hover:bg-blue-50/30 transition-all flex justify-between items-center cursor-pointer group" onClick={() => loadCase(c)}>
                                             <div className="space-y-1"><p className="text-blue-600 font-black text-xl md:text-3xl mb-1 tracking-tighter">[{c.orderNo || "無編號"}]</p><p className="text-base md:text-xl font-bold text-slate-500">{c.address || "無地址"}</p><p className="text-[10px] text-slate-400 font-black uppercase mt-2">同步時間: {new Date(c.updatedAt).toLocaleString()}</p></div>
-                                            <Icon name="chevron-right" className="w-8 h-8 md:w-12 md:h-12 text-slate-200 group-hover:text-blue-500 transition-colors" />
+                                            <div className="flex items-center gap-2 md:gap-4">
+                                                <button onClick={(e) => handleDeleteClick(e, c.orderNo)} className="p-3 md:p-4 bg-red-50 text-red-500 rounded-full hover:bg-red-500 hover:text-white transition-all shadow-sm" title="刪除">
+                                                    <Icon name="trash-2" className="w-5 h-5 md:w-6 md:h-6" />
+                                                </button>
+                                                <Icon name="chevron-right" className="w-8 h-8 md:w-12 md:h-12 text-slate-200 group-hover:text-blue-500 transition-colors hidden sm:block" />
+                                            </div>
                                         </div>
                                     ))}
                                 </div>
@@ -558,6 +609,23 @@ ${text}`;
                                 <h3 className="text-xl md:text-2xl font-black text-center text-slate-800 mb-2 md:mb-3">{alertMsg.title}</h3>
                                 <p className="text-slate-500 text-sm font-bold leading-relaxed text-center whitespace-pre-wrap">{alertMsg.body}</p>
                                 <button onClick={() => setAlertMsg(null)} className="mt-6 md:mt-8 w-full bg-slate-900 text-white py-3 md:py-4 rounded-xl md:rounded-2xl font-black text-base md:text-lg shadow-lg active:scale-95 transition-all">我知道了</button>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* 🚀 新增：確認刪除彈窗 UI */}
+                    {confirmDialog && (
+                        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
+                            <div className="bg-white rounded-3xl md:rounded-[2.5rem] p-6 md:p-8 max-w-sm w-full shadow-2xl animate-in fade-in zoom-in duration-200">
+                                <div className="w-16 h-16 md:w-20 md:h-20 rounded-full flex items-center justify-center mx-auto mb-4 md:mb-6 bg-red-50 text-red-500">
+                                    <Icon name="alert-triangle" className="w-8 h-8 md:w-10 md:h-10" />
+                                </div>
+                                <h3 className="text-xl md:text-2xl font-black text-center text-slate-800 mb-2 md:mb-3">{confirmDialog.title}</h3>
+                                <p className="text-slate-500 text-sm font-bold leading-relaxed text-center whitespace-pre-wrap">{confirmDialog.body}</p>
+                                <div className="mt-6 md:mt-8 flex gap-3">
+                                    <button onClick={() => setConfirmDialog(null)} className="flex-1 bg-slate-100 text-slate-600 py-3 md:py-4 rounded-xl md:rounded-2xl font-black text-base md:text-lg shadow-sm active:scale-95 transition-all">取消</button>
+                                    <button onClick={confirmDialog.onConfirm} className="flex-1 bg-red-500 text-white py-3 md:py-4 rounded-xl md:rounded-2xl font-black text-base md:text-lg shadow-lg shadow-red-500/30 active:scale-95 transition-all">確認刪除</button>
+                                </div>
                             </div>
                         </div>
                     )}
