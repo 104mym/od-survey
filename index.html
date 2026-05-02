@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <!-- 強制瀏覽器不使用快取 -->
+    <!-- 強制瀏覽器不使用快取，確保立刻看到最新版 -->
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
@@ -59,7 +59,9 @@
             return <span ref={ref} className="inline-flex items-center justify-center" />;
         };
 
-        const version = "v1.5.5 (自動備援版)";
+        const version = "v1.5.6 (終極除錯版)";
+        
+        // 🚀 關鍵：請將這裡換成您從 Google AI Studio「Create API key in new project」取得的全新金鑰
         const builtInApiKey = "AIzaSyCBBjJwbHHvuTDvgJbyUZzHOYyE5Owa5bg"; 
 
         const App = () => {
@@ -159,20 +161,16 @@
                     let data = null;
                     let errorMessage = "";
                     
-                    // 🚀 自動備援機制：如果第一個模型被擋，就自動嘗試下一個
-                    const models = ["gemini-1.5-flash-latest", "gemini-1.5-flash", "gemini-pro"];
+                    // 🚀 更新為最新支援的模型庫
+                    const models = ["gemini-1.5-flash", "gemini-1.5-flash-8b", "gemini-1.5-pro"];
                     
                     for (const model of models) {
                         try {
                             const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${builtInApiKey}`;
                             const payload = {
-                                contents: [{ parts: [{ text: `指令：${promptText}\n內容：${text}` }] }]
+                                contents: [{ parts: [{ text: `指令：${promptText}\n內容：${text}` }] }],
+                                generationConfig: { responseMimeType: "application/json" }
                             };
-                            
-                            // 只有 1.5 版支援強制輸出 JSON
-                            if (model.includes("1.5")) {
-                                payload.generationConfig = { responseMimeType: "application/json" };
-                            }
 
                             const resp = await fetch(url, {
                                 method: 'POST',
@@ -182,11 +180,10 @@
                             
                             if (resp.ok) {
                                 data = await resp.json();
-                                break; // 成功取得資料，跳出迴圈
+                                break; 
                             } else {
                                 const errData = await resp.json();
-                                errorMessage = errData.error?.message || `HTTP 錯誤碼: ${resp.status}`;
-                                console.warn(`嘗試模型 ${model} 失敗:`, errorMessage);
+                                errorMessage = errData.error?.message || `HTTP ${resp.status}`;
                             }
                         } catch (err) {
                             errorMessage = err.message;
@@ -194,12 +191,15 @@
                     }
 
                     if (!data) {
-                        throw new Error(`所有 AI 模型皆無法存取。\n最後錯誤原因：${errorMessage}`);
+                        // 如果出現 not found 錯誤，提供非常明確的指示
+                        if (errorMessage.includes("not found")) {
+                            throw new Error(`金鑰有效，但找不到對應的 AI 模型。\n\n👉 請至 aistudio.google.com\n👉 點擊「Create API key in new project」\n👉 產生一把新的金鑰來替換即可解決！`);
+                        } else {
+                            throw new Error(`AI 拒絕連線。\n詳細原因：${errorMessage}`);
+                        }
                     }
                     
                     let rawText = data.candidates[0].content.parts[0].text;
-                    
-                    // 防呆：去除可能包覆的 markdown 標籤 (針對 gemini-pro)
                     const startIdx = rawText.indexOf('{');
                     const endIdx = rawText.lastIndexOf('}');
                     if (startIdx !== -1 && endIdx !== -1) {
@@ -420,7 +420,7 @@
                             <div className="bg-slate-900 rounded-3xl md:rounded-[3rem] p-6 md:p-10 text-center relative overflow-hidden shadow-2xl border-4 md:border-8 border-white">
                                 {isLoading && <div className="absolute inset-0 bg-slate-900/95 z-30 flex flex-col items-center justify-center"><Icon name="loader-2" className="animate-spin text-blue-500 w-16 h-16 mb-4" /><p className="text-blue-400 font-black tracking-widest text-base md:text-lg animate-pulse uppercase italic">AI 正在解析數據...</p></div>}
                                 <button onClick={toggleRecording} className={`w-24 h-24 md:w-32 md:h-32 rounded-full flex items-center justify-center mx-auto transition-all border-[8px] md:border-[12px] border-slate-800 shadow-2xl ${isRecording ? 'record-pulse' : 'bg-white hover:scale-105 active:scale-95'}`}>
-                                    {isRecording ? <div className="w-8 h-8 md:w-10 md:h-10 bg-white rounded-md md:rounded-lg"></div> : <Icon name="mic" className="w-10 h-10 md:w-16 md:h-16 text-slate-900" />}
+                                    {isRecording ? <div className="w-8 h-8 bg-white rounded-md md:rounded-lg"></div> : <Icon name="mic" className="w-10 h-10 md:w-16 md:h-16 text-slate-900" />}
                                 </button>
                                 {transcript !== "" && (
                                     <div className="mt-6 md:mt-8 space-y-4 md:space-y-6 text-left">
