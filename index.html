@@ -3,6 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <!-- 強制瀏覽器不使用快取 -->
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
     <title>丈量尺寸 - 官方旗艦優化版</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -55,7 +59,7 @@
             return <span ref={ref} className="inline-flex items-center justify-center" />;
         };
 
-        const version = "v1.5.3 (除錯增強版)";
+        const version = "v1.5.5 (自動備援版)";
         const builtInApiKey = "AIzaSyCBBjJwbHHvuTDvgJbyUZzHOYyE5Owa5bg"; 
 
         const App = () => {
@@ -151,29 +155,58 @@
 糾正錯字：門止(門子)、貝-WING(備贏)、子母(紫母)、防撞條(防狀)。
 結構：{ "header": { "address": "", "partHandle": "", "partCollision": "", "partStop": "", "partHinge": "", "redNotice": "", "precautions": "", "orderRemark": "" }, "items": [ { "no": "", "w": 0, "h": 0, "t": 0, "note": "" } ] }`;
 
-                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${builtInApiKey}`;
                 try {
-                    const resp = await fetch(url, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            contents: [{ parts: [{ text: `指令：${promptText}\n內容：${text}` }] }],
-                            generationConfig: { responseMimeType: "application/json" }
-                        })
-                    });
+                    let data = null;
+                    let errorMessage = "";
                     
-                    // 🚀 優化：擷取精確的錯誤訊息，不再只是顯示「無法連線」
-                    if (!resp.ok) {
-                        let errorMessage = "未知錯誤";
+                    // 🚀 自動備援機制：如果第一個模型被擋，就自動嘗試下一個
+                    const models = ["gemini-1.5-flash-latest", "gemini-1.5-flash", "gemini-pro"];
+                    
+                    for (const model of models) {
                         try {
-                            const errorData = await resp.json();
-                            errorMessage = errorData.error?.message || "伺服器無具體回應";
-                        } catch(e) {}
-                        throw new Error(`Google 拒絕存取 (可能因為限制了網址或金鑰無效)。\n官方錯誤訊息：${errorMessage}`);
+                            const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${builtInApiKey}`;
+                            const payload = {
+                                contents: [{ parts: [{ text: `指令：${promptText}\n內容：${text}` }] }]
+                            };
+                            
+                            // 只有 1.5 版支援強制輸出 JSON
+                            if (model.includes("1.5")) {
+                                payload.generationConfig = { responseMimeType: "application/json" };
+                            }
+
+                            const resp = await fetch(url, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify(payload)
+                            });
+                            
+                            if (resp.ok) {
+                                data = await resp.json();
+                                break; // 成功取得資料，跳出迴圈
+                            } else {
+                                const errData = await resp.json();
+                                errorMessage = errData.error?.message || `HTTP 錯誤碼: ${resp.status}`;
+                                console.warn(`嘗試模型 ${model} 失敗:`, errorMessage);
+                            }
+                        } catch (err) {
+                            errorMessage = err.message;
+                        }
+                    }
+
+                    if (!data) {
+                        throw new Error(`所有 AI 模型皆無法存取。\n最後錯誤原因：${errorMessage}`);
                     }
                     
-                    const data = await resp.json();
-                    const result = JSON.parse(data.candidates[0].content.parts[0].text);
+                    let rawText = data.candidates[0].content.parts[0].text;
+                    
+                    // 防呆：去除可能包覆的 markdown 標籤 (針對 gemini-pro)
+                    const startIdx = rawText.indexOf('{');
+                    const endIdx = rawText.lastIndexOf('}');
+                    if (startIdx !== -1 && endIdx !== -1) {
+                        rawText = rawText.substring(startIdx, endIdx + 1);
+                    }
+
+                    const result = JSON.parse(rawText);
                     
                     let updatedHeader = { ...header };
                     if (result.header) {
@@ -461,6 +494,7 @@
                                             </div>
                                         </div>
                                     ))}
+                                    {allCases.length === 0 && <div className="p-10 text-center text-slate-400 font-black italic">尚無雲端資料</div>}
                                 </div>
                             </div>
                         </main>
@@ -471,7 +505,7 @@
                             <div className="bg-white rounded-[2rem] p-6 max-w-sm w-full shadow-2xl animate-in zoom-in duration-200 text-center">
                                 <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 ${alertMsg.isError ? 'bg-red-50 text-red-500' : 'bg-emerald-50 text-emerald-500'}`}><Icon name={alertMsg.isError ? "x-circle" : "check-circle-2"} className="w-8 h-8" /></div>
                                 <h3 className="text-xl font-black mb-2">{alertMsg.title}</h3>
-                                <p className="text-slate-500 text-sm font-bold whitespace-pre-wrap leading-relaxed">{alertMsg.body}</p>
+                                <p className="text-slate-500 text-sm font-bold whitespace-pre-wrap leading-relaxed text-left max-h-[40vh] overflow-y-auto break-all">{alertMsg.body}</p>
                                 <button onClick={() => setAlertMsg(null)} className="mt-6 w-full bg-slate-900 text-white py-3 rounded-xl font-black">確定</button>
                             </div>
                         </div>
