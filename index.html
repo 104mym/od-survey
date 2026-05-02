@@ -29,9 +29,9 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, getDoc, deleteDoc, collection, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-        window.FB = { initializeApp, getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, getFirestore, doc, setDoc, getDoc, deleteDoc, collection, onSnapshot };
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, deleteDoc, collection, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        window.FB = { initializeApp, getAuth, signInAnonymously, onAuthStateChanged, getFirestore, doc, setDoc, deleteDoc, collection, onSnapshot };
     </script>
 
     <script type="text/babel">
@@ -55,7 +55,7 @@
             return <span ref={ref} className="inline-flex items-center justify-center" />;
         };
 
-        const version = "v1.5.2 (穩定修復版)";
+        const version = "v1.5.3 (除錯增強版)";
         const builtInApiKey = "AIzaSyCBBjJwbHHvuTDvgJbyUZzHOYyE5Owa5bg"; 
 
         const App = () => {
@@ -147,11 +147,10 @@
             const parseSpeech = async (text) => {
                 if (!text.trim()) return;
                 setIsLoading(true);
-                const promptText = `你是一位專業丈量秘書。請分析以下語音內容，並將其分類填入 JSON 格式。
-【糾正錯字規則】：門止(門子)、貝-WING(備贏)、子母(紫母)、防撞條(防狀)。
-【JSON結構】：{ "header": { "address": "", "partHandle": "", "partCollision": "", "partStop": "", "partHinge": "", "redNotice": "", "precautions": "", "orderRemark": "" }, "items": [ { "no": "", "w": 0, "h": 0, "t": 0, "note": "" } ] }`;
+                const promptText = `你是一位專業丈量秘書。分析語音內容並填入 JSON。
+糾正錯字：門止(門子)、貝-WING(備贏)、子母(紫母)、防撞條(防狀)。
+結構：{ "header": { "address": "", "partHandle": "", "partCollision": "", "partStop": "", "partHinge": "", "redNotice": "", "precautions": "", "orderRemark": "" }, "items": [ { "no": "", "w": 0, "h": 0, "t": 0, "note": "" } ] }`;
 
-                // 🚀 直接呼叫模型，避開權限不足導致的驗證失敗
                 const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${builtInApiKey}`;
                 try {
                     const resp = await fetch(url, {
@@ -162,7 +161,17 @@
                             generationConfig: { responseMimeType: "application/json" }
                         })
                     });
-                    if (!resp.ok) throw new Error("AI 服務暫時無法回應，請確認金鑰設定或網路。");
+                    
+                    // 🚀 優化：擷取精確的錯誤訊息，不再只是顯示「無法連線」
+                    if (!resp.ok) {
+                        let errorMessage = "未知錯誤";
+                        try {
+                            const errorData = await resp.json();
+                            errorMessage = errorData.error?.message || "伺服器無具體回應";
+                        } catch(e) {}
+                        throw new Error(`Google 拒絕存取 (可能因為限制了網址或金鑰無效)。\n官方錯誤訊息：${errorMessage}`);
+                    }
+                    
                     const data = await resp.json();
                     const result = JSON.parse(data.candidates[0].content.parts[0].text);
                     
