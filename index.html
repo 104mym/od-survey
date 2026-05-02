@@ -31,7 +31,6 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, getDoc, deleteDoc, collection, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-        
         window.FB = { initializeApp, getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, getFirestore, doc, setDoc, getDoc, deleteDoc, collection, onSnapshot };
     </script>
 
@@ -56,10 +55,7 @@
             return <span ref={ref} className="inline-flex items-center justify-center" />;
         };
 
-        // 🚀 版本號：v1.4.2 (恢復完整 Excel 美編排版)
-        const version = "v1.4.2";
-        
-        // 內建金鑰 (請確保此金鑰在您的 Google AI Studio 是有效的)
+        const version = "v1.5.2 (穩定修復版)";
         const builtInApiKey = "AIzaSyCBBjJwbHHvuTDvgJbyUZzHOYyE5Owa5bg"; 
 
         const App = () => {
@@ -81,7 +77,7 @@
             const logoInputRef = useRef(null);
             const transcriptAccumulator = useRef(""); 
 
-            const canvasAppId = typeof __app_id !== 'undefined' ? __app_id : 'od-survey-system';
+            const canvasAppId = 'od-survey-system';
 
             const [header, setHeader] = useState({
                 orderNo: "", address: "", contact: "", phone: "", surveyor: "", company: "",
@@ -146,28 +142,30 @@
                     setAllCases(list.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)));
                 });
                 return () => unsubscribe();
-            }, [user, db, canvasAppId]);
+            }, [user, db]);
 
             const parseSpeech = async (text) => {
                 if (!text.trim()) return;
                 setIsLoading(true);
                 const promptText = `你是一位專業丈量秘書。請分析以下語音內容，並將其分類填入 JSON 格式。
-糾正錯字：門止(門子)、貝-WING(備贏)、子母(紫母)、防撞條(防狀)。
-結構：{ "header": { "address": "", "partHandle": "", "partCollision": "", "partStop": "", "partHinge": "", "redNotice": "", "precautions": "", "orderRemark": "" }, "items": [ { "no": "", "w": 0, "h": 0, "t": 0, "note": "" } ] }`;
+【糾正錯字規則】：門止(門子)、貝-WING(備贏)、子母(紫母)、防撞條(防狀)。
+【JSON結構】：{ "header": { "address": "", "partHandle": "", "partCollision": "", "partStop": "", "partHinge": "", "redNotice": "", "precautions": "", "orderRemark": "" }, "items": [ { "no": "", "w": 0, "h": 0, "t": 0, "note": "" } ] }`;
 
+                // 🚀 直接呼叫模型，避開權限不足導致的驗證失敗
                 const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${builtInApiKey}`;
                 try {
                     const resp = await fetch(url, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            contents: [{ role: "user", parts: [{ text: `指令：${promptText}\n內容：${text}` }] }],
+                            contents: [{ parts: [{ text: `指令：${promptText}\n內容：${text}` }] }],
                             generationConfig: { responseMimeType: "application/json" }
                         })
                     });
-                    if (!resp.ok) throw new Error("AI 服務呼叫失敗。");
+                    if (!resp.ok) throw new Error("AI 服務暫時無法回應，請確認金鑰設定或網路。");
                     const data = await resp.json();
                     const result = JSON.parse(data.candidates[0].content.parts[0].text);
+                    
                     let updatedHeader = { ...header };
                     if (result.header) {
                         for (const key in result.header) { if (result.header[key]) updatedHeader[key] = result.header[key]; }
@@ -183,7 +181,7 @@
                         setMeasurements([...measurements, ...newItems]);
                     }
                     setTranscript(""); 
-                    setAlertMsg({ title: "解析完成", body: "數據已帶入表格！", isError: false });
+                    setAlertMsg({ title: "解析完成", body: "數據已自動帶入！", isError: false });
                 } catch (e) { 
                     setAlertMsg({ title: "解析失敗", body: e.message, isError: true });
                 } finally { setIsLoading(false); }
@@ -208,7 +206,7 @@
                 setIsLoading(true);
                 try {
                     await syncToCloud();
-                    setAlertMsg({ title: "同步成功", body: `編號 [${header.orderNo}] 已儲存！`, isError: false });
+                    setAlertMsg({ title: "同步成功", body: `編號 [${header.orderNo}] 已儲存。`, isError: false });
                 } catch (e) { setAlertMsg({ title: "同步失敗", body: e.message, isError: true }); }
                 finally { setIsLoading(false); }
             };
@@ -245,7 +243,6 @@
                             cell.border = b; cell.alignment = { vertical:'middle', horizontal:'left' }; cell.font = { bold:true, size:12 };
                         }
                     }
-                    tit.alignment = { vertical:'middle', horizontal:'center' };
 
                     sh.getRow(7).height = 25; sh.getRow(8).height = 25;
                     sh.mergeCells('A7:B8'); sh.getCell('A7').value = "門框\n樣式:"; sh.mergeCells('C7:E8'); sh.getCell('C7').value = header.frameStyle;
@@ -339,53 +336,55 @@
                 <div className="min-h-screen flex flex-col pb-20 relative text-slate-800">
                     <nav className="bg-slate-900 text-white p-4 md:p-5 shadow-xl sticky top-0 z-50 flex justify-between items-center">
                         <div className="flex items-center gap-3">
-                            <div className="bg-white p-1 rounded-xl shadow-lg relative overflow-hidden">
-                                {logoImgBase64 && <img src={logoImgBase64} className="w-8 h-8 md:w-10 md:h-10 object-contain" />}
+                            <div className="bg-white p-1 rounded-xl shadow-lg relative overflow-hidden group cursor-pointer" onClick={() => logoInputRef.current.click()}>
+                                {logoImgBase64 && <img src={logoImgBase64} className="w-8 h-8 md:w-10 md:h-10 object-contain" alt="Logo" />}
+                                <div className="absolute inset-0 bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"><Icon name="upload" className="w-4 h-4 text-white" /></div>
+                                <input type="file" ref={logoInputRef} hidden accept="image/*" onChange={(e) => {
+                                    const file = e.target.files[0]; if (file) {
+                                        const reader = new FileReader();
+                                        reader.onload = (ev) => { setLogoImgBase64(ev.target.result); localStorage.setItem('customLogo', ev.target.result); };
+                                        reader.readAsDataURL(file);
+                                    }
+                                }} />
                             </div>
                             <div className="cursor-pointer" onClick={() => setView("main")}>
                                 <h1 className="text-lg md:text-2xl font-black italic uppercase leading-none tracking-tighter">丈量尺寸</h1>
-                                <div className="flex items-center gap-2 mt-1">
-                                    <span className="text-[9px] md:text-[10px] font-bold text-emerald-400 uppercase">{version}</span>
-                                </div>
+                                <div className="flex items-center gap-2 mt-1"><span className="text-[9px] md:text-[10px] font-bold text-emerald-400 uppercase">{version}</span></div>
                             </div>
                         </div>
                         <div className="flex gap-2">
-                            <button onClick={() => setView(view === 'main' ? 'history' : 'main')} className="bg-slate-800 px-3 py-2 md:px-4 md:py-2 rounded-xl text-xs font-black flex items-center gap-1"><Icon name={view === 'main' ? "list" : "chevron-left"} className="w-4 h-4" /> {view === 'main' ? "紀錄" : "返回"}</button>
-                            <button onClick={handleManualSync} className="bg-blue-600 px-3 py-2 md:px-4 md:py-2 rounded-xl text-xs font-black shadow-lg">同步</button>
+                            <button onClick={() => setView(view === 'main' ? 'history' : 'main')} className="bg-slate-800 px-3 py-2 md:px-4 md:py-2 rounded-xl text-xs font-black flex items-center gap-1 transition-colors hover:bg-slate-700">
+                                <Icon name={view === 'main' ? "list" : "chevron-left"} className="w-4 h-4" /> {view === 'main' ? "紀錄" : "返回"}
+                            </button>
+                            <button onClick={handleManualSync} className="bg-blue-600 px-3 py-2 md:px-4 md:py-2 rounded-xl text-xs font-black shadow-lg hover:bg-blue-500 transition-colors">同步</button>
                         </div>
                     </nav>
 
                     {view === "main" ? (
-                        <main className="p-3 md:p-8 max-w-7xl mx-auto w-full space-y-6 md:space-y-8 animate-in fade-in duration-500">
+                        <main className="p-3 md:p-8 max-w-7xl mx-auto w-full space-y-6 animate-in fade-in duration-500">
                             <div className="card p-5 md:p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 md:gap-6">
                                 <div className="space-y-1"><label className="text-xs font-black text-slate-400 uppercase tracking-widest">編號</label><input value={header.orderNo} onChange={e=>setHeader({...header, orderNo: e.target.value})} className="w-full border-b-2 p-1 text-lg md:text-xl font-black text-blue-600 outline-none" placeholder="輸入編號" /></div>
                                 <div className="lg:col-span-2 space-y-1"><label className="text-xs font-black text-slate-400 uppercase tracking-widest">案場地址</label><input value={header.address} onChange={e=>setHeader({...header, address: e.target.value})} className="w-full border-b-2 p-1 text-lg md:text-xl font-bold outline-none" placeholder="輸入地址" /></div>
-                                <div className="space-y-1 text-center"><label className="text-xs font-black text-red-500 uppercase tracking-widest">影片預覽</label>
+                                <div className="space-y-1 text-center">
+                                    <label className="text-xs font-black text-red-500 uppercase tracking-widest">影片預覽</label>
                                     <button onClick={()=>fileInputRef.current.click()} className="w-full bg-slate-50 py-2.5 md:py-3 rounded-xl text-xs font-black border flex items-center justify-center gap-2">
-                                        <Icon name="video" className="w-4 h-4" /> {header.videoLink ? "更換影片" : "選取影片"}
+                                        <Icon name="video" className="w-4 h-4 md:w-5 md:h-5" /> {header.videoLink ? "更換影片" : "選取影片"}
                                     </button>
                                     <input type="file" ref={fileInputRef} hidden accept="video/*" onChange={e=>{if(e.target.files[0]) setHeader({...header, videoLink:URL.createObjectURL(e.target.files[0])})}} />
                                 </div>
-                                <button onClick={exportExcel} className="bg-emerald-600 text-white py-2.5 md:py-3 rounded-xl text-sm font-black shadow-lg mt-auto flex items-center justify-center gap-2"><Icon name="file-spreadsheet" className="w-5 h-5 md:w-6 md:h-6" /> 導出 EXCEL</button>
+                                <button onClick={exportExcel} className="bg-emerald-600 text-white py-2.5 md:py-3 rounded-xl text-sm font-black shadow-lg mt-auto flex items-center justify-center gap-2 hover:bg-emerald-500 transition-all"><Icon name="file-spreadsheet" className="w-5 h-5 md:w-6 md:h-6" /> 導出 EXCEL</button>
                             </div>
-
-                            {header.videoLink && (
-                                <div className="bg-black rounded-2xl md:rounded-[2.5rem] overflow-hidden shadow-2xl aspect-video max-w-2xl mx-auto border-4 md:border-8 border-white relative group">
-                                    <video src={header.videoLink} controls className="w-full h-full object-cover"></video>
-                                    <button onClick={()=>{setHeader({...header, videoLink:''});}} className="absolute top-4 right-4 bg-red-500 text-white p-2 rounded-full shadow-xl"><Icon name="trash-2" className="w-5 h-5" /></button>
-                                </div>
-                            )}
 
                             <div className="bg-slate-900 rounded-3xl md:rounded-[3rem] p-6 md:p-10 text-center relative overflow-hidden shadow-2xl border-4 md:border-8 border-white">
                                 {isLoading && <div className="absolute inset-0 bg-slate-900/95 z-30 flex flex-col items-center justify-center"><Icon name="loader-2" className="animate-spin text-blue-500 w-16 h-16 mb-4" /><p className="text-blue-400 font-black tracking-widest text-base md:text-lg animate-pulse uppercase italic">AI 正在解析數據...</p></div>}
-                                <button onClick={toggleRecording} className={`w-24 h-24 md:w-32 md:h-32 rounded-full flex items-center justify-center mx-auto transition-all border-[8px] md:border-[12px] border-slate-800 shadow-2xl ${isRecording ? 'record-pulse' : 'bg-white'}`}>
+                                <button onClick={toggleRecording} className={`w-24 h-24 md:w-32 md:h-32 rounded-full flex items-center justify-center mx-auto transition-all border-[8px] md:border-[12px] border-slate-800 shadow-2xl ${isRecording ? 'record-pulse' : 'bg-white hover:scale-105 active:scale-95'}`}>
                                     {isRecording ? <div className="w-8 h-8 md:w-10 md:h-10 bg-white rounded-md md:rounded-lg"></div> : <Icon name="mic" className="w-10 h-10 md:w-16 md:h-16 text-slate-900" />}
                                 </button>
                                 {transcript !== "" && (
                                     <div className="mt-6 md:mt-8 space-y-4 md:space-y-6 text-left">
                                         <div className="bg-slate-800/50 p-4 rounded-xl border border-slate-700 relative mt-4">
-                                            <label className="absolute -top-3 left-3 bg-slate-900 text-blue-400 text-[10px] font-black px-2 uppercase tracking-widest">語音逐字稿</label>
-                                            <textarea value={transcript} onChange={(e) => setTranscript(e.target.value)} className="w-full bg-transparent text-white/90 text-sm md:text-base font-bold italic leading-relaxed focus:outline-none resize-none min-h-[60px] md:min-h-[80px]" />
+                                            <label className="absolute -top-3 left-3 bg-slate-900 text-blue-400 text-[10px] font-black px-2 uppercase tracking-widest">語音逐字稿預覽</label>
+                                            <textarea value={transcript} onChange={(e) => setTranscript(e.target.value)} className="w-full bg-transparent text-white/90 text-sm md:text-base font-bold italic leading-relaxed focus:outline-none resize-none min-h-[60px] md:min-h-[100px]" />
                                         </div>
                                         {!isRecording && <button onClick={() => parseSpeech(transcript)} className="mx-auto bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-6 py-3 md:px-8 md:py-4 rounded-xl md:rounded-2xl font-black text-base md:text-lg shadow-xl flex items-center justify-center gap-2 md:gap-3 active:scale-95 transition-all"><Icon name="bot" className="w-5 h-5 md:w-6 md:h-6" /> 解析並帶入</button>}
                                     </div>
@@ -399,20 +398,20 @@
                                 </div>
                                 <div className="overflow-x-auto no-scrollbar">
                                     <table className="w-full text-left min-w-[900px] text-center border-separate border-spacing-0">
-                                        <thead className="bg-slate-50 text-[10px] md:text-xs text-slate-400 font-black uppercase border-b sticky top-0 z-10">
+                                        <thead className="bg-slate-50 text-[10px] md:text-xs text-slate-400 font-black uppercase border-b sticky top-0 z-10 shadow-sm">
                                             <tr><th className="px-4 md:px-8 py-4">序號</th><th className="px-2 py-4 text-blue-700">洞寬</th><th className="px-2 py-4 text-blue-700">洞高</th><th className="px-2 py-4 text-emerald-600">門寬(-48)</th><th className="px-2 py-4 text-emerald-600">門高(-30)</th><th className="px-2 py-4">牆厚</th><th className="px-4 py-4 text-left">備註</th><th className="w-16"></th></tr>
                                         </thead>
                                         <tbody className="divide-y divide-slate-100">
                                             {measurements.map(m => (
-                                                <tr key={m.id} className="hover:bg-blue-50/20 group">
+                                                <tr key={m.id} className="hover:bg-blue-50/20 group transition-colors">
                                                     <td className="px-4 py-4 font-bold text-slate-400 text-base md:text-xl italic">{m.no}</td>
-                                                    <td className="px-2 py-4"><input type="number" value={m.w || ""} onChange={e=>{ const val = parseInt(e.target.value) || 0; setMeasurements(measurements.map(x => x.id === m.id ? {...x, w:val, dw:val-48} : x)); }} className="w-full bg-transparent border-none p-0 text-base md:text-xl font-black text-blue-800 text-center" /></td>
-                                                    <td className="px-2 py-4"><input type="number" value={m.h || ""} onChange={e=>{ const val = parseInt(e.target.value) || 0; setMeasurements(measurements.map(x => x.id === m.id ? {...x, h:val, dh:val-30} : x)); }} className="w-full bg-transparent border-none p-0 text-base md:text-xl font-black text-blue-800 text-center" /></td>
+                                                    <td className="px-2 py-4"><input type="number" value={m.w || ""} onChange={e=>{ const val = parseInt(e.target.value) || 0; setMeasurements(measurements.map(x => x.id === m.id ? {...x, w:val, dw:val-48} : x)); }} className="w-full bg-transparent border-none p-0 text-base md:text-xl font-black text-blue-800 text-center focus:ring-0" /></td>
+                                                    <td className="px-2 py-4"><input type="number" value={m.h || ""} onChange={e=>{ const val = parseInt(e.target.value) || 0; setMeasurements(measurements.map(x => x.id === m.id ? {...x, h:val, dh:val-30} : x)); }} className="w-full bg-transparent border-none p-0 text-base md:text-xl font-black text-blue-800 text-center focus:ring-0" /></td>
                                                     <td className="px-2 py-4 font-black text-emerald-600 text-lg md:text-2xl">{m.dw}</td>
                                                     <td className="px-2 py-4 font-black text-emerald-600 text-lg md:text-2xl">{m.dh}</td>
-                                                    <td className="px-2 py-4"><input type="number" value={m.t || ""} onChange={e=>{ const val = parseInt(e.target.value) || 0; setMeasurements(measurements.map(x => x.id === m.id ? {...x, t:val} : x)); }} className="w-full bg-transparent border-none p-0 text-base md:text-xl font-bold text-center" /></td>
-                                                    <td className="px-4 py-4 text-left"><input value={m.note} onChange={e=>setMeasurements(measurements.map(x=>x.id===m.id?{...x, note:e.target.value}:x))} className="w-full bg-transparent border-none p-0 text-sm md:text-base font-bold italic" /></td>
-                                                    <td><button onClick={() => setMeasurements(measurements.filter(x=>x.id!==m.id))} className="text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100"><Icon name="trash-2" className="w-5 h-5" /></button></td>
+                                                    <td className="px-2 py-4"><input type="number" value={m.t || ""} onChange={e=>{ const val = parseInt(e.target.value) || 0; setMeasurements(measurements.map(x => x.id === m.id ? {...x, t:val} : x)); }} className="w-full bg-transparent border-none p-0 text-base md:text-xl font-bold text-center focus:ring-0" /></td>
+                                                    <td className="px-4 py-4 text-left"><input value={m.note} onChange={e=>setMeasurements(measurements.map(x=>x.id===m.id?{...x, note:e.target.value}:x))} className="w-full bg-transparent border-none p-0 text-sm md:text-base font-bold italic focus:ring-0" /></td>
+                                                    <td><button onClick={() => setMeasurements(measurements.filter(x=>x.id!==m.id))} className="text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"><Icon name="trash-2" className="w-5 h-5" /></button></td>
                                                 </tr>
                                             ))}
                                         </tbody>
@@ -424,32 +423,32 @@
                                 <h3 className="section-title uppercase tracking-widest italic">配件與詳細備註</h3>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                     <div className="space-y-4">
-                                        <div className="space-y-1.5"><label className="text-xs font-black text-blue-500 uppercase tracking-widest">注意事項</label><textarea rows="2" value={header.precautions} onChange={e=>setHeader({...header, precautions:e.target.value})} className="w-full bg-slate-50 border rounded-xl p-3 text-base font-bold resize-none" /></div>
-                                        <div className="space-y-1.5"><label className="text-xs font-black text-blue-500 uppercase tracking-widest">訂單備註</label><textarea rows="2" value={header.orderRemark} onChange={e=>setHeader({...header, orderRemark:e.target.value})} className="w-full bg-slate-50 border rounded-xl p-3 text-base font-bold resize-none" /></div>
+                                        <div className="space-y-1.5"><label className="text-xs font-black text-blue-500">注意事項</label><textarea rows="2" value={header.precautions} onChange={e=>setHeader({...header, precautions:e.target.value})} className="w-full bg-slate-50 border rounded-xl p-3 text-base font-bold resize-none" /></div>
+                                        <div className="space-y-1.5"><label className="text-xs font-black text-blue-500">訂單備註</label><textarea rows="2" value={header.orderRemark} onChange={e=>setHeader({...header, orderRemark:e.target.value})} className="w-full bg-slate-50 border rounded-xl p-3 text-base font-bold resize-none" /></div>
                                     </div>
-                                    <div className="space-y-1.5"><label className="text-xs font-black text-red-500 uppercase tracking-widest italic font-black">大紅字警示區</label><textarea rows="4" value={header.redNotice} onChange={e=>setHeader({...header, redNotice:e.target.value})} className="w-full bg-red-50/30 border border-red-100 rounded-2xl p-4 text-red-600 font-black text-2xl text-center resize-none leading-relaxed shadow-inner" placeholder="門下大陸" /></div>
+                                    <div className="space-y-1.5"><label className="text-xs font-black text-red-500 italic font-black">大紅字警示區</label><textarea rows="4" value={header.redNotice} onChange={e=>setHeader({...header, redNotice:e.target.value})} className="w-full bg-red-50/30 border border-red-100 rounded-2xl p-4 text-red-600 font-black text-2xl text-center resize-none leading-relaxed shadow-inner" placeholder="門下大陸" /></div>
                                 </div>
                                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-8">
                                     {['partCollision','partHinge','partStop','partHandle'].map((k, i) => (
                                         <div key={k} className="bg-slate-50 p-4 md:p-6 rounded-2xl md:rounded-3xl border border-slate-200 text-center shadow-sm">
                                             <label className="text-xs font-black text-slate-400 mb-2 md:mb-3 block uppercase tracking-widest">{['防撞條','鉸鏈','門止','把手'][i]}</label>
-                                            <textarea rows="3" value={header[k]} onChange={e=>setHeader({...header, [k]:e.target.value})} className="w-full bg-white border rounded-xl p-2 md:p-4 text-base md:text-xl font-black outline-none resize-none text-center leading-loose text-slate-700 shadow-inner" placeholder="語音填入" />
+                                            <textarea rows="3" value={header[k]} onChange={e=>setHeader({...header, [k]:e.target.value})} className="w-full bg-white border rounded-xl p-2 md:p-4 text-base md:text-xl font-black outline-none resize-none text-center leading-loose text-slate-700 shadow-inner" />
                                         </div>
                                     ))}
                                 </div>
                             </div>
                         </main>
                     ) : (
-                        <main className="p-4 max-w-5xl mx-auto w-full">
+                        <main className="p-4 max-w-5xl mx-auto w-full animate-in slide-in-from-bottom duration-300">
                             <div className="card">
-                                <div className="p-6 bg-slate-900 text-white flex justify-between items-center rounded-t-2xl"><h3 className="font-black italic uppercase text-lg tracking-widest">歷史紀錄</h3><span className="bg-blue-600 px-3 py-1 rounded-full text-xs font-black">{allCases.length} 案存檔</span></div>
+                                <div className="p-6 bg-slate-900 text-white flex justify-between items-center rounded-t-2xl"><h3 className="font-black italic uppercase text-lg tracking-widest">雲端存檔清單</h3><span className="bg-blue-600 px-3 py-1 rounded-full text-xs font-black italic">{allCases.length} 案存檔</span></div>
                                 <div className="divide-y divide-slate-100">
                                     {allCases.map(c => (
                                         <div key={c.id} className="p-5 hover:bg-blue-50/30 transition-all flex justify-between items-center cursor-pointer group" onClick={() => loadCase(c)}>
                                             <div className="space-y-1"><p className="text-blue-600 font-black text-xl md:text-3xl mb-1 tracking-tighter">[{c.orderNo || "無編號"}]</p><p className="text-base md:text-xl font-bold text-slate-500">{c.address || "無地址"}</p></div>
                                             <div className="flex items-center gap-4">
-                                                <button onClick={(e) => { e.stopPropagation(); setConfirmDialog({ title: "刪除紀錄", body: `確定刪除 [${c.orderNo}] 嗎？`, onConfirm: async () => { await window.FB.deleteDoc(window.FB.doc(db, 'artifacts', canvasAppId, 'public', 'data', 'cases', c.orderNo)); setConfirmDialog(null); } }); }} className="p-3 text-red-500 hover:bg-red-50 rounded-full transition-all"><Icon name="trash-2" className="w-5 h-5 md:w-6 md:h-6" /></button>
-                                                <Icon name="chevron-right" className="w-8 h-8 text-slate-200 group-hover:text-blue-500" />
+                                                <button onClick={(e) => { e.stopPropagation(); setConfirmDialog({ title: "刪除紀錄", body: `確定刪除 [${c.orderNo}] 嗎？`, onConfirm: async () => { try { await window.FB.deleteDoc(window.FB.doc(db, 'artifacts', canvasAppId, 'public', 'data', 'cases', c.orderNo)); setConfirmDialog(null); } catch(e){} } }); }} className="p-3 text-red-500 hover:bg-red-50 rounded-full transition-all"><Icon name="trash-2" className="w-5 h-5 md:w-6 md:h-6" /></button>
+                                                <Icon name="chevron-right" className="w-8 h-8 text-slate-200 group-hover:text-blue-500 transition-all" />
                                             </div>
                                         </div>
                                     ))}
@@ -463,7 +462,7 @@
                             <div className="bg-white rounded-[2rem] p-6 max-w-sm w-full shadow-2xl animate-in zoom-in duration-200 text-center">
                                 <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 ${alertMsg.isError ? 'bg-red-50 text-red-500' : 'bg-emerald-50 text-emerald-500'}`}><Icon name={alertMsg.isError ? "x-circle" : "check-circle-2"} className="w-8 h-8" /></div>
                                 <h3 className="text-xl font-black mb-2">{alertMsg.title}</h3>
-                                <p className="text-slate-500 text-sm font-bold whitespace-pre-wrap">{alertMsg.body}</p>
+                                <p className="text-slate-500 text-sm font-bold whitespace-pre-wrap leading-relaxed">{alertMsg.body}</p>
                                 <button onClick={() => setAlertMsg(null)} className="mt-6 w-full bg-slate-900 text-white py-3 rounded-xl font-black">確定</button>
                             </div>
                         </div>
@@ -476,8 +475,8 @@
                                 <h3 className="text-xl font-black mb-2">{confirmDialog.title}</h3>
                                 <p className="text-slate-500 text-sm font-bold">{confirmDialog.body}</p>
                                 <div className="mt-6 flex gap-3">
-                                    <button onClick={() => setConfirmDialog(null)} className="flex-1 bg-slate-100 text-slate-600 py-3 rounded-xl font-black">取消</button>
-                                    <button onClick={confirmDialog.onConfirm} className="flex-1 bg-red-500 text-white py-3 rounded-xl font-black">確認刪除</button>
+                                    <button onClick={() => setConfirmDialog(null)} className="flex-1 bg-slate-100 text-slate-600 py-3 rounded-xl font-black transition-all active:scale-95">取消</button>
+                                    <button onClick={confirmDialog.onConfirm} className="flex-1 bg-red-500 text-white py-3 rounded-xl font-black shadow-lg transition-all active:scale-95">確認刪除</button>
                                 </div>
                             </div>
                         </div>
