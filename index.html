@@ -59,10 +59,10 @@
             return <span ref={ref} className="inline-flex items-center justify-center" />;
         };
 
-        const version = "v1.5.8 (金鑰完成版)";
+        const version = "v1.6.0 (安全設定版)";
         
-        // 🚀 已經為您換上最新的金鑰
-        const builtInApiKey = "AIzaSyAssUiVS9fR5_pPJLUx3SC9VgQ2t1gylFo"; 
+        // 舊的寫死金鑰（保留作為退路，但不建議使用以防 GitHub 撤銷）
+        const builtInApiKey = "AIzaSyCBBjJwbHHvuTDvgJbyUZzHOYyE5Owa5bg"; 
 
         const App = () => {
             const [view, setView] = useState("main"); 
@@ -77,6 +77,10 @@
             const [logoImgBase64, setLogoImgBase64] = useState("");
             const [alertMsg, setAlertMsg] = useState(null); 
             const [confirmDialog, setConfirmDialog] = useState(null);
+            
+            // UI 設定相關
+            const [showSettings, setShowSettings] = useState(false);
+            const [localApiKey, setLocalApiKey] = useState(localStorage.getItem('gemini_api_key') || "");
 
             const recognitionRef = useRef(null);
             const fileInputRef = useRef(null);
@@ -153,9 +157,9 @@
             const parseSpeech = async (text) => {
                 if (!text.trim()) return;
                 
-                // 防呆機制：檢查是否忘記換金鑰
-                if (builtInApiKey.includes("請貼上") || builtInApiKey.includes("請在這裡貼上")) {
-                    setAlertMsg({ title: "忘記更換金鑰囉！", body: "請到 GitHub 上把 builtInApiKey 的內容換成您新申請的金鑰喔！", isError: true });
+                const currentApiKey = localApiKey || builtInApiKey;
+                if (!currentApiKey) {
+                    setAlertMsg({ title: "缺少 API 金鑰", body: "請點擊右上角「設定」輸入您的 Google Gemini API Key。", isError: true });
                     return;
                 }
 
@@ -168,11 +172,12 @@
                     let data = null;
                     let errorMessage = "";
                     
-                    const models = ["gemini-1.5-flash", "gemini-1.5-flash-8b", "gemini-1.5-pro"];
+                    // 🚀 擴大支援的模型庫，確保連線順暢
+                    const models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-flash-8b", "gemini-1.5-pro"];
                     
                     for (const model of models) {
                         try {
-                            const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${builtInApiKey}`;
+                            const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${currentApiKey}`;
                             const payload = {
                                 contents: [{ parts: [{ text: `指令：${promptText}\n內容：${text}` }] }],
                                 generationConfig: { responseMimeType: "application/json" }
@@ -197,8 +202,11 @@
                     }
 
                     if (!data) {
+                        // 如果出現 not found 錯誤，提供非常明確的指示
                         if (errorMessage.includes("not found")) {
-                            throw new Error(`金鑰有效，但找不到對應的 AI 模型。\n\n👉 請至 aistudio.google.com\n👉 點擊「Create API key in new project」\n👉 產生一把新的金鑰來替換即可解決！`);
+                            throw new Error(`找不到對應的 AI 模型或金鑰已被撤銷。\n\n⚠️ 如果您將程式碼發布到了 GitHub，您的金鑰很可能已被 Google 自動停用。\n👉 請至 aistudio.google.com 重新產生金鑰。\n👉 點擊網頁右上角「設定」輸入新金鑰！`);
+                        } else if (errorMessage.includes("API key not valid") || errorMessage.includes("API key not found")) {
+                            throw new Error(`API 金鑰無效或不存在。\n\n👉 請點擊網頁右上角「設定」輸入正確的新金鑰！`);
                         } else {
                             throw new Error(`AI 拒絕連線。\n詳細原因：${errorMessage}`);
                         }
@@ -228,7 +236,7 @@
                         setMeasurements([...measurements, ...newItems]);
                     }
                     setTranscript(""); 
-                    setAlertMsg({ title: "🎉 解析完成", body: "完美！語音數據已自動帶入！", isError: false });
+                    setAlertMsg({ title: "解析完成", body: "數據已自動帶入！", isError: false });
                 } catch (e) { 
                     setAlertMsg({ title: "解析失敗", body: e.message, isError: true });
                 } finally { setIsLoading(false); }
@@ -377,7 +385,7 @@
 
             const loadCase = (c) => { setHeader({ ...c }); setMeasurements(c.items || []); setView('main'); };
 
-            if (!isReady) return <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white italic font-black text-3xl animate-pulse uppercase tracking-widest">系統加載中...</div>;
+            if (!isReady) return <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white italic font-black text-3xl animate-pulse">系統加載中...</div>;
 
             return (
                 <div className="min-h-screen flex flex-col pb-20 relative text-slate-800">
@@ -399,11 +407,14 @@
                                 <div className="flex items-center gap-2 mt-1"><span className="text-[9px] md:text-[10px] font-bold text-emerald-400 uppercase">{version}</span></div>
                             </div>
                         </div>
-                        <div className="flex gap-2">
-                            <button onClick={() => setView(view === 'main' ? 'history' : 'main')} className="bg-slate-800 px-3 py-2 md:px-4 md:py-2 rounded-xl text-xs font-black flex items-center gap-1 transition-colors hover:bg-slate-700">
-                                <Icon name={view === 'main' ? "list" : "chevron-left"} className="w-4 h-4" /> {view === 'main' ? "紀錄" : "返回"}
+                        <div className="flex gap-1.5 md:gap-2">
+                            <button onClick={() => setShowSettings(true)} className="bg-slate-800 px-2.5 py-2 md:px-4 md:py-2 rounded-xl text-[10px] md:text-xs font-black flex items-center gap-1 transition-colors hover:bg-slate-700">
+                                <Icon name="settings" className="w-4 h-4" /> <span className="hidden sm:inline">設定</span>
                             </button>
-                            <button onClick={handleManualSync} className="bg-blue-600 px-3 py-2 md:px-4 md:py-2 rounded-xl text-xs font-black shadow-lg hover:bg-blue-500 transition-colors">同步</button>
+                            <button onClick={() => setView(view === 'main' ? 'history' : 'main')} className="bg-slate-800 px-2.5 py-2 md:px-4 md:py-2 rounded-xl text-[10px] md:text-xs font-black flex items-center gap-1 transition-colors hover:bg-slate-700">
+                                <Icon name={view === 'main' ? "list" : "chevron-left"} className="w-4 h-4" /> <span className="hidden sm:inline">{view === 'main' ? "紀錄" : "返回"}</span>
+                            </button>
+                            <button onClick={handleManualSync} className="bg-blue-600 px-2.5 py-2 md:px-4 md:py-2 rounded-xl text-[10px] md:text-xs font-black shadow-lg hover:bg-blue-500 transition-colors">同步</button>
                         </div>
                     </nav>
 
@@ -505,13 +516,50 @@
                         </main>
                     )}
 
+                    {/* 設定彈窗 */}
+                    {showSettings && (
+                        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+                            <div className="bg-white rounded-[2rem] p-6 max-w-sm w-full shadow-2xl animate-in zoom-in duration-200">
+                                <div className="flex justify-between items-center mb-4">
+                                    <h3 className="text-xl font-black">系統設定</h3>
+                                    <button onClick={() => setShowSettings(false)} className="text-slate-400 hover:text-slate-600"><Icon name="x" className="w-6 h-6" /></button>
+                                </div>
+                                <div className="space-y-4">
+                                    <div>
+                                        <label className="text-xs font-black text-slate-500 mb-2 block tracking-widest uppercase">Google Gemini API Key</label>
+                                        <input 
+                                            type="password" 
+                                            value={localApiKey} 
+                                            onChange={(e) => setLocalApiKey(e.target.value)} 
+                                            placeholder="請輸入 AIzaSy 開頭的金鑰..."
+                                            className="w-full border-2 border-slate-200 rounded-xl p-3 font-bold text-sm outline-none focus:border-blue-500 transition-colors"
+                                        />
+                                        <p className="text-[11px] text-slate-500 mt-3 font-bold leading-relaxed bg-blue-50 p-3 rounded-lg border border-blue-100">
+                                            💡 提示：將金鑰寫死在程式碼中會被 GitHub 偵測並自動撤銷。請在此輸入您的金鑰，系統將安全的保存在您的瀏覽器中。
+                                        </p>
+                                    </div>
+                                    <button 
+                                        onClick={() => {
+                                            localStorage.setItem('gemini_api_key', localApiKey.trim());
+                                            setShowSettings(false);
+                                            setAlertMsg({ title: "儲存成功", body: "API 金鑰已安全更新！", isError: false });
+                                        }} 
+                                        className="w-full bg-blue-600 text-white py-3 rounded-xl font-black shadow-lg hover:bg-blue-500 transition-colors"
+                                    >
+                                        儲存設定
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     {alertMsg && (
                         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
                             <div className="bg-white rounded-[2rem] p-6 max-w-sm w-full shadow-2xl animate-in zoom-in duration-200 text-center">
                                 <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 ${alertMsg.isError ? 'bg-red-50 text-red-500' : 'bg-emerald-50 text-emerald-500'}`}><Icon name={alertMsg.isError ? "x-circle" : "check-circle-2"} className="w-8 h-8" /></div>
                                 <h3 className="text-xl font-black mb-2">{alertMsg.title}</h3>
                                 <p className="text-slate-500 text-sm font-bold whitespace-pre-wrap leading-relaxed text-left max-h-[40vh] overflow-y-auto break-all">{alertMsg.body}</p>
-                                <button onClick={() => setAlertMsg(null)} className="mt-6 w-full bg-slate-900 text-white py-3 rounded-xl font-black shadow-lg active:scale-95 transition-all">確定</button>
+                                <button onClick={() => setAlertMsg(null)} className="mt-6 w-full bg-slate-900 text-white py-3 rounded-xl font-black">確定</button>
                             </div>
                         </div>
                     )}
@@ -521,7 +569,7 @@
                             <div className="bg-white rounded-[2rem] p-6 max-w-sm w-full shadow-2xl animate-in zoom-in duration-200 text-center">
                                 <div className="w-16 h-16 rounded-full bg-red-50 text-red-500 flex items-center justify-center mx-auto mb-4"><Icon name="alert-triangle" className="w-8 h-8" /></div>
                                 <h3 className="text-xl font-black mb-2">{confirmDialog.title}</h3>
-                                <p className="text-slate-500 text-sm font-bold leading-relaxed">{confirmDialog.body}</p>
+                                <p className="text-slate-500 text-sm font-bold">{confirmDialog.body}</p>
                                 <div className="mt-6 flex gap-3">
                                     <button onClick={() => setConfirmDialog(null)} className="flex-1 bg-slate-100 text-slate-600 py-3 rounded-xl font-black transition-all active:scale-95">取消</button>
                                     <button onClick={confirmDialog.onConfirm} className="flex-1 bg-red-500 text-white py-3 rounded-xl font-black shadow-lg transition-all active:scale-95">確認刪除</button>
