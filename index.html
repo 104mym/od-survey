@@ -59,10 +59,10 @@
             return <span ref={ref} className="inline-flex items-center justify-center" />;
         };
 
-        const version = "v1.5.6 (終極除錯版)";
+        const version = "v1.5.8 (金鑰完成版)";
         
-        // 🚀 關鍵：請將這裡換成您從 Google AI Studio「Create API key in new project」取得的全新金鑰
-        const builtInApiKey = "AIzaSyCBBjJwbHHvuTDvgJbyUZzHOYyE5Owa5bg"; 
+        // 🚀 已經為您換上最新的金鑰
+        const builtInApiKey = "AIzaSyAssUiVS9fR5_pPJLUx3SC9VgQ2t1gylFo"; 
 
         const App = () => {
             const [view, setView] = useState("main"); 
@@ -152,6 +152,13 @@
 
             const parseSpeech = async (text) => {
                 if (!text.trim()) return;
+                
+                // 防呆機制：檢查是否忘記換金鑰
+                if (builtInApiKey.includes("請貼上") || builtInApiKey.includes("請在這裡貼上")) {
+                    setAlertMsg({ title: "忘記更換金鑰囉！", body: "請到 GitHub 上把 builtInApiKey 的內容換成您新申請的金鑰喔！", isError: true });
+                    return;
+                }
+
                 setIsLoading(true);
                 const promptText = `你是一位專業丈量秘書。分析語音內容並填入 JSON。
 糾正錯字：門止(門子)、貝-WING(備贏)、子母(紫母)、防撞條(防狀)。
@@ -161,7 +168,6 @@
                     let data = null;
                     let errorMessage = "";
                     
-                    // 🚀 更新為最新支援的模型庫
                     const models = ["gemini-1.5-flash", "gemini-1.5-flash-8b", "gemini-1.5-pro"];
                     
                     for (const model of models) {
@@ -191,7 +197,6 @@
                     }
 
                     if (!data) {
-                        // 如果出現 not found 錯誤，提供非常明確的指示
                         if (errorMessage.includes("not found")) {
                             throw new Error(`金鑰有效，但找不到對應的 AI 模型。\n\n👉 請至 aistudio.google.com\n👉 點擊「Create API key in new project」\n👉 產生一把新的金鑰來替換即可解決！`);
                         } else {
@@ -223,7 +228,7 @@
                         setMeasurements([...measurements, ...newItems]);
                     }
                     setTranscript(""); 
-                    setAlertMsg({ title: "解析完成", body: "數據已自動帶入！", isError: false });
+                    setAlertMsg({ title: "🎉 解析完成", body: "完美！語音數據已自動帶入！", isError: false });
                 } catch (e) { 
                     setAlertMsg({ title: "解析失敗", body: e.message, isError: true });
                 } finally { setIsLoading(false); }
@@ -372,7 +377,7 @@
 
             const loadCase = (c) => { setHeader({ ...c }); setMeasurements(c.items || []); setView('main'); };
 
-            if (!isReady) return <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white italic font-black text-3xl animate-pulse">系統加載中...</div>;
+            if (!isReady) return <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white italic font-black text-3xl animate-pulse uppercase tracking-widest">系統加載中...</div>;
 
             return (
                 <div className="min-h-screen flex flex-col pb-20 relative text-slate-800">
@@ -506,7 +511,7 @@
                                 <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 ${alertMsg.isError ? 'bg-red-50 text-red-500' : 'bg-emerald-50 text-emerald-500'}`}><Icon name={alertMsg.isError ? "x-circle" : "check-circle-2"} className="w-8 h-8" /></div>
                                 <h3 className="text-xl font-black mb-2">{alertMsg.title}</h3>
                                 <p className="text-slate-500 text-sm font-bold whitespace-pre-wrap leading-relaxed text-left max-h-[40vh] overflow-y-auto break-all">{alertMsg.body}</p>
-                                <button onClick={() => setAlertMsg(null)} className="mt-6 w-full bg-slate-900 text-white py-3 rounded-xl font-black">確定</button>
+                                <button onClick={() => setAlertMsg(null)} className="mt-6 w-full bg-slate-900 text-white py-3 rounded-xl font-black shadow-lg active:scale-95 transition-all">確定</button>
                             </div>
                         </div>
                     )}
@@ -516,7 +521,7 @@
                             <div className="bg-white rounded-[2rem] p-6 max-w-sm w-full shadow-2xl animate-in zoom-in duration-200 text-center">
                                 <div className="w-16 h-16 rounded-full bg-red-50 text-red-500 flex items-center justify-center mx-auto mb-4"><Icon name="alert-triangle" className="w-8 h-8" /></div>
                                 <h3 className="text-xl font-black mb-2">{confirmDialog.title}</h3>
-                                <p className="text-slate-500 text-sm font-bold">{confirmDialog.body}</p>
+                                <p className="text-slate-500 text-sm font-bold leading-relaxed">{confirmDialog.body}</p>
                                 <div className="mt-6 flex gap-3">
                                     <button onClick={() => setConfirmDialog(null)} className="flex-1 bg-slate-100 text-slate-600 py-3 rounded-xl font-black transition-all active:scale-95">取消</button>
                                     <button onClick={confirmDialog.onConfirm} className="flex-1 bg-red-500 text-white py-3 rounded-xl font-black shadow-lg transition-all active:scale-95">確認刪除</button>
