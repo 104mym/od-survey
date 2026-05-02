@@ -144,7 +144,7 @@
                     
                     const foot = cur; sh.getRow(foot).height = 25; sh.mergeCells(`A${foot}:D${foot}`); sh.getCell(`A${foot}`).value = "注意事項:"; sh.mergeCells(`E${foot}:L${foot}`); sh.getCell(`E${foot}`).value = "訂單備註:";
                     for(let c=1; c<=12; c++) { const cell = sh.getCell(foot, c); cell.font = {color:{argb:'FF0000FF'}, bold:true, size:12}; cell.border = b; cell.alignment = {vertical:'middle', horizontal:'left'}; cell.fill = {type:'pattern',pattern:'solid',fgColor:{argb:'FFF2F2F2'}}; }
-                    sh.mergeCells(`A${foot+1}:D${foot+6}`); sh.getCell(`A${foot+1}`).value = caseData.precautions || ""; sh.getCell(`A${foot+1}`).alignment = { vertical:'top', horizontal:'left', wrapText:true }; sh.getCell(`A${foot+1}`).font = { bold:true, size:12 };
+                    sh.mergeCells(`A${foot+1}:D${foot+8}`); sh.getCell(`A${foot+1}`).value = caseData.precautions || ""; sh.getCell(`A${foot+1}`).alignment = { vertical:'top', horizontal:'left', wrapText:true }; sh.getCell(`A${foot+1}`).font = { bold:true, size:12 };
                     
                     // 將 外部影片連結/備註 顯示在 Excel 紅字備註區
                     let remarkText = (caseData.orderRemark ? caseData.orderRemark + '\n' : '');
@@ -156,11 +156,12 @@
                     sh.getRow(foot+4).height = 25; sh.mergeCells(`E${foot+4}:F${foot+4}`); sh.getCell(`E${foot+4}`).value = "防撞條"; sh.mergeCells(`G${foot+4}:H${foot+4}`); sh.getCell(`G${foot+4}`).value = "鉸鏈"; sh.mergeCells(`I${foot+4}:J${foot+4}`); sh.getCell(`I${foot+4}`).value = "門止"; sh.mergeCells(`K${foot+4}:L${foot+4}`); sh.getCell(`K${foot+4}`).value = "把手";
                     for(let c=5; c<=12; c++) { const cell = sh.getCell(foot+4, c); cell.alignment = {vertical:'middle', horizontal:'center'}; cell.font = {bold:true, size:12}; cell.fill = {type:'pattern',pattern:'solid',fgColor:{argb:'FFF2F2F2'}}; }
                     
-                    sh.mergeCells(`E${foot+5}:F${foot+6}`); sh.getCell(`E${foot+5}`).value = caseData.partCollision || ""; sh.mergeCells(`G${foot+5}:H${foot+6}`); sh.getCell(`G${foot+5}`).value = caseData.partHinge || ""; sh.mergeCells(`I${foot+5}:J${foot+6}`); sh.getCell(`I${foot+5}`).value = caseData.partStop || ""; sh.mergeCells(`K${foot+5}:L${foot+6}`); sh.getCell(`K${foot+5}`).value = caseData.partHandle || "";
+                    // 擴大為四格空間 (foot+5 到 foot+8)
+                    sh.mergeCells(`E${foot+5}:F${foot+8}`); sh.getCell(`E${foot+5}`).value = caseData.partCollision || ""; sh.mergeCells(`G${foot+5}:H${foot+8}`); sh.getCell(`G${foot+5}`).value = caseData.partHinge || ""; sh.mergeCells(`I${foot+5}:J${foot+8}`); sh.getCell(`I${foot+5}`).value = caseData.partStop || ""; sh.mergeCells(`K${foot+5}:L${foot+8}`); sh.getCell(`K${foot+5}`).value = caseData.partHandle || "";
                     for(let c=5; c<=12; c++) { const cell = sh.getCell(foot+5, c); cell.alignment = {vertical:'middle', horizontal:'center', wrapText:true}; cell.font = {bold:true, size:12}; }
-                    for(let r=foot+1; r<=foot+6; r++) { for(let c=1; c<=12; c++) sh.getCell(r, c).border = b; }
+                    for(let r=foot+1; r<=foot+8; r++) { for(let c=1; c<=12; c++) sh.getCell(r, c).border = b; }
                     
-                    const endRow = foot+7; sh.getRow(endRow).height = 25; sh.mergeCells(`A${endRow}:D${endRow}`); sh.getCell(`A${endRow}`).value = "訂金: " + (caseData.deposit || "0"); sh.mergeCells(`E${endRow}:L${endRow}`); sh.getCell(`E${endRow}`).value = "審核:";
+                    const endRow = foot+9; sh.getRow(endRow).height = 25; sh.mergeCells(`A${endRow}:D${endRow}`); sh.getCell(`A${endRow}`).value = "訂金: " + (caseData.deposit || "0"); sh.mergeCells(`E${endRow}:L${endRow}`); sh.getCell(`E${endRow}`).value = "審核:";
                     for(let c=1; c<=12; c++) { const cell = sh.getCell(endRow, c); cell.font = {color:{argb:'FF0000FF'}, bold:true, size:14}; cell.border = b; cell.alignment = {vertical:'middle', horizontal:'left'}; }
                     
                     const buf = await wb.xlsx.writeBuffer(); const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([buf])); link.download = `智揚校對單_${caseData.orderNo}.xlsx`; link.click();
