@@ -54,7 +54,7 @@
             return <span ref={ref} className="inline-flex items-center justify-center" />;
         };
 
-        const version = "v4.0.2 (修復刪除版)";
+        const version = "v4.1.0 (圖片樣式版)";
         const builtInApiKey = "AIzaSyCBBjJwbHHvuTDvgJbyUZzHOYyE5Owa5bg"; 
 
         const App = () => {
@@ -75,14 +75,15 @@
 
             const recognitionRef = useRef(null);
             const logoInputRef = useRef(null);
+            const styleImageInputRef = useRef(null);
             const transcriptAccumulator = useRef(""); 
             const canvasAppId = 'od-survey-system';
 
             const [header, setHeader] = useState({
                 orderNo: "", address: "", contact: "", phone: "", surveyor: "", company: "",
-                frameStyle: "", doorStyle: "", precautions: "", orderRemark: "", redNotice: "",
+                frameStyle: "", doorStyle: "", orderRemark: "", redNotice: "",
                 partCollision: "", partHinge: "", partStop: "", partHandle: "",
-                deposit: "0", videoLink: "", externalVideoLink: "" 
+                deposit: "0", videoLink: "", externalVideoLink: "", styleImageBase64: "" 
             });
 
             const getLogoBase64 = async () => {
@@ -147,6 +148,31 @@
                 return () => unsubscribe();
             }, [user, db]);
 
+            const handleStyleImageUpload = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        let w = img.width;
+                        let h = img.height;
+                        const maxDim = 800; // 自動壓縮圖片至最大邊 800px 節省空間
+                        if (w > maxDim || h > maxDim) {
+                            if (w > h) { h = Math.round((h * maxDim) / w); w = maxDim; } 
+                            else { w = Math.round((w * maxDim) / h); h = maxDim; }
+                        }
+                        canvas.width = w; canvas.height = h;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0, w, h);
+                        setHeader(prev => ({ ...prev, styleImageBase64: canvas.toDataURL('image/jpeg', 0.8) }));
+                    };
+                    img.src = ev.target.result;
+                };
+                reader.readAsDataURL(file);
+            };
+
             const exportExcel = async () => {
                 setIsLoading(true);
                 try {
@@ -177,7 +203,6 @@
                     hRow.eachCell(c => { c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFF2F2F2'}}; c.border=b; c.alignment={horizontal:'center', vertical:'middle'}; c.font={bold:true, size:11}; });
                     let cur = 10; measurements.forEach((m) => {
                         const r = sh.getRow(cur++); r.height = 25; 
-                        // 改為讀取動態欄位，預設為 房 / 隱 / 空白
                         r.values = [m.no, m.w, m.h, m.dw, m.dh, m.t, m.t, 50, m.note, m.style || "房", m.doorStop || "隱", m.bottom || ""];
                         r.eachCell((c, colIdx) => { c.border=b; c.alignment={horizontal:'center', vertical:'middle'}; c.font={bold:true, size:12}; if(colIdx === 9 && c.value) { c.font = { color:{argb:'FFFF0000'}, bold:true, size:12 }; } });
                     });
@@ -186,7 +211,7 @@
                     // 完美排版區域 (左右對齊設計，下半部五金佔 4 格高度)
                     // =========================
                     const foot = cur; sh.getRow(foot).height = 25; 
-                    sh.mergeCells(`A${foot}:D${foot}`); sh.getCell(`A${foot}`).value = "框門注意事項:"; 
+                    sh.mergeCells(`A${foot}:D${foot}`); sh.getCell(`A${foot}`).value = "樣式:"; 
                     sh.mergeCells(`E${foot}:L${foot}`); sh.getCell(`E${foot}`).value = "訂單備註:";
                     for(let c=1; c<=12; c++) { 
                         const cell = sh.getCell(foot, c); 
@@ -196,12 +221,24 @@
                         cell.fill = {type:'pattern',pattern:'solid',fgColor:{argb:'FFF2F2F2'}}; 
                     }
                     
-                    // 左側：框門注意事項 (向下合併 8 列)
+                    // 左側：樣式圖片 (向下合併 8 列)
                     sh.mergeCells(`A${foot+1}:D${foot+8}`); 
-                    sh.getCell(`A${foot+1}`).value = header.precautions || ""; 
-                    sh.getCell(`A${foot+1}`).alignment = { vertical:'top', horizontal:'left', wrapText:true }; 
-                    sh.getCell(`A${foot+1}`).font = { bold:true, size:12 };
-                    
+                    if (header.styleImageBase64) {
+                        try {
+                            const imgId = wb.addImage({
+                                base64: header.styleImageBase64.split(',')[1],
+                                extension: 'jpeg',
+                            });
+                            sh.addImage(imgId, {
+                                tl: { col: 0.1, row: foot + 0.1 },
+                                br: { col: 3.9, row: foot + 7.9 },
+                                editAs: 'oneCell'
+                            });
+                        } catch (e) {
+                            console.warn("Excel加入圖片失敗", e);
+                        }
+                    }
+
                     // 右側上半部：訂單備註 (向下合併 3 列)
                     let remarkText = header.orderRemark || "";
                     if (header.redNotice) remarkText += (remarkText ? '\n' : '') + header.redNotice;
@@ -261,7 +298,7 @@
                 if (!text.trim()) return;
                 const currentApiKey = localApiKey || builtInApiKey;
                 setIsLoading(true);
-                const promptText = `你是一位專業丈量秘書。分析語音內容並填入 JSON。糾正錯字：門止(門子)、貝-WING(備贏)、子母(紫母)、防撞條(防狀)。結構：{ "header": { "address": "", "partHandle": "", "partCollision": "", "partStop": "", "partHinge": "", "orderRemark": "", "precautions": "" }, "items": [ { "no": "", "w": 0, "h": 0, "t": 0, "note": "", "style": "房", "doorStop": "隱", "bottom": "" } ] }`;
+                const promptText = `你是一位專業丈量秘書。分析語音內容並填入 JSON。糾正錯字：門止(門子)、貝-WING(備贏)、子母(紫母)、防撞條(防狀)。結構：{ "header": { "address": "", "partHandle": "", "partCollision": "", "partStop": "", "partHinge": "", "orderRemark": "" }, "items": [ { "no": "", "w": 0, "h": 0, "t": 0, "note": "", "style": "房", "doorStop": "隱", "bottom": "" } ] }`;
                 try {
                     let data = null;
                     const models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"];
@@ -386,9 +423,34 @@
                             <div className="card p-5 md:p-10 space-y-6 bg-slate-50/50">
                                 <h3 className="section-title italic tracking-widest uppercase">詳細備註與配件</h3>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    {/* 樣式圖片上傳區 */}
                                     <div className="flex flex-col space-y-2">
-                                        <label className="text-xs font-black text-blue-600 uppercase tracking-widest bg-blue-100/50 px-2 py-1 rounded inline-block w-fit">框門注意事項</label>
-                                        <textarea value={header.precautions} onChange={e=>setHeader({...header, precautions:e.target.value})} className="w-full bg-white border border-slate-200 rounded-xl p-4 text-base font-bold resize-none outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-50 flex-1 min-h-[10rem] shadow-inner" />
+                                        <label className="text-xs font-black text-blue-600 uppercase tracking-widest bg-blue-100/50 px-2 py-1 rounded inline-block w-fit">樣式</label>
+                                        <div 
+                                            className="w-full bg-white border-2 border-dashed border-slate-300 rounded-xl flex items-center justify-center relative overflow-hidden group hover:border-blue-400 transition-colors flex-1 min-h-[10rem] cursor-pointer shadow-inner"
+                                            onClick={() => styleImageInputRef.current.click()}
+                                        >
+                                            {header.styleImageBase64 ? (
+                                                <>
+                                                    <img src={header.styleImageBase64} alt="樣式" className="w-full h-full object-contain p-2" />
+                                                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                                        <span className="text-white font-black flex items-center gap-2 bg-black/50 px-4 py-2 rounded-lg"><Icon name="edit-2" className="w-5 h-5"/> 點擊更換圖片</span>
+                                                    </div>
+                                                </>
+                                            ) : (
+                                                <div className="text-slate-400 flex flex-col items-center gap-2 group-hover:text-blue-500 transition-colors">
+                                                    <Icon name="image-plus" className="w-8 h-8" />
+                                                    <span className="font-bold text-sm tracking-widest uppercase">點擊上傳圖片</span>
+                                                </div>
+                                            )}
+                                            <input 
+                                                type="file" 
+                                                ref={styleImageInputRef} 
+                                                hidden 
+                                                accept="image/*" 
+                                                onChange={handleStyleImageUpload}
+                                            />
+                                        </div>
                                     </div>
                                     <div className="flex flex-col space-y-2">
                                         <label className="text-xs font-black text-red-600 uppercase tracking-widest bg-red-100/50 px-2 py-1 rounded inline-block w-fit">訂單備註 (大紅字)</label>
