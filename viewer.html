@@ -59,6 +59,7 @@
             const [caseData, setCaseData] = useState(null);
             const [isLoading, setIsLoading] = useState(false);
             const [logoImgBase64, setLogoImgBase64] = useState("");
+            const [zoomedImage, setZoomedImage] = useState(null); // 控制圖片放大的狀態
 
             const firebaseConfig = {
                 apiKey: "AIzaSyBEcCQcuwCh30xDmj3wE-3CM2YffgIxfAk",
@@ -403,12 +404,17 @@
                                     <h3 className="section-title uppercase tracking-widest">詳細備註與五金</h3>
                                     
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        {/* 樣式圖片唯讀顯示 */}
+                                        {/* 樣式圖片唯讀顯示 (點擊放大) */}
                                         <div className="bg-white p-4 rounded-xl border border-slate-200 flex flex-col shadow-sm">
-                                            <label className="text-[10px] font-black text-blue-500 block mb-2 tracking-widest uppercase">樣式 (設計圖/草圖)</label>
-                                            <div className="w-full flex-1 flex items-center justify-center min-h-[10rem] bg-slate-50 rounded-lg overflow-hidden border border-slate-100 relative">
+                                            <label className="text-[10px] font-black text-blue-500 block mb-2 tracking-widest uppercase">樣式</label>
+                                            <div className="w-full flex-1 flex items-center justify-center min-h-[10rem] bg-slate-50 rounded-lg overflow-hidden border border-slate-100 relative group">
                                                 {caseData.styleImageBase64 ? (
-                                                    <img src={caseData.styleImageBase64} alt="樣式" className="w-full h-full object-contain absolute inset-0 m-auto" />
+                                                    <img 
+                                                        src={caseData.styleImageBase64} 
+                                                        alt="樣式" 
+                                                        className="w-full h-full object-contain absolute inset-0 m-auto cursor-pointer group-hover:scale-105 transition-transform duration-300" 
+                                                        onClick={() => setZoomedImage(caseData.styleImageBase64)}
+                                                    />
                                                 ) : (
                                                     <span className="text-slate-300 font-bold text-sm tracking-widest italic">無樣式圖片</span>
                                                 )}
@@ -437,8 +443,23 @@
                         )}
                     </main>
 
+                    {/* 全螢幕圖片放大遮罩 */}
+                    {zoomedImage && (
+                        <div className="fixed inset-0 bg-slate-900/90 z-[500] flex items-center justify-center p-4" onClick={() => setZoomedImage(null)}>
+                            <div className="relative max-w-full max-h-full">
+                                <button 
+                                    onClick={(e) => { e.stopPropagation(); setZoomedImage(null); }} 
+                                    className="absolute -top-12 right-0 text-white bg-slate-800 rounded-full p-2 hover:bg-slate-700 transition-colors"
+                                >
+                                    <Icon name="x" className="w-6 h-6" />
+                                </button>
+                                <img src={zoomedImage} alt="放大樣式" className="max-w-full max-h-[85vh] object-contain rounded-lg shadow-2xl" />
+                            </div>
+                        </div>
+                    )}
+
                     <footer className="mt-auto py-8 text-center opacity-20 text-[8px] font-black uppercase tracking-[0.4em]">
-                        Zhiyang Official Worker Viewer v4.4.1
+                        Zhiyang Official Worker Viewer v4.4.2
                     </footer>
                 </div>
             );
